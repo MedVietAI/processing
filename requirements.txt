@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+huggingface_hub
+requests
+google-genai
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+orjson
+ftfy
+langid
