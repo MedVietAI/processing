@@ -28,5 +28,5 @@ short_description: Process and centralise medical doc for llm finetuning
 [Request Doc](https://huggingface.co/spaces/MedAI-COS30018/MedAI_Processing/blob/main/REQUEST.md)
 
 ## License
-[Apache-2.0 LICENSE](https://huggingface.co/spaces/BinKhoaLe1812/MedAI_Processing/blob/main/LICENSE.txt)
+[Apache-2.0 LICENSE](https://huggingface.co/spaces/MedAI-COS30018/MedAI_Processing/blob/main/LICENSE.txt)
 
