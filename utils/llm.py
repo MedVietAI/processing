@@ -154,18 +154,18 @@ class Paraphraser:
         return self._clean_resp(out) if out else text
 
     # ————— Translate & Backtranslate —————
-    def translate(self, text: str, target_lang: str = "de") -> Optional[str]:
+    def translate(self, text: str, target_lang: str = "vi") -> Optional[str]:
         if not text: return text
         prompt = f"Translate to {target_lang}. Keep meaning exact, preserve medical terms:\n\n{text}"
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(800, len(text)+100))
         if out: return out.strip()
         return self.gm_easy.generate(prompt, max_output_tokens=min(800, len(text)+100))
 
-    def backtranslate(self, text: str, via_lang: str = "de") -> Optional[str]:
+    def backtranslate(self, text: str, via_lang: str = "vi") -> Optional[str]:
         if not text: return text
         mid = self.translate(text, target_lang=via_lang)
         if not mid: return None
-        prompt = f"Translate the following {via_lang} text back to English, preserving the exact meaning:\n\n{mid}"
+        prompt = f"Translate the following Vietnamese text back to English, preserving the exact meaning:\n\n{mid}"
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(900, len(text)+150))
         if out: return out.strip()
         res = self.gm_easy.generate(prompt, max_output_tokens=min(900, len(text)+150))

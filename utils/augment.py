@@ -93,7 +93,7 @@ def maybe_paraphrase(text: str, ratio: float, paraphraser, difficulty: str) -> T
 def maybe_backtranslate(text: str, ratio: float, paraphraser) -> Tuple[str, bool]:
     if ratio <= 0 or not text: return text, False
     if random.random() < ratio:
-        bt = paraphraser.backtranslate(text, via_lang="de")
+        bt = paraphraser.backtranslate(text, via_lang="vi")
         return bt if bt else text, bool(bt)
     return text, False
 

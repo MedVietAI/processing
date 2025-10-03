@@ -5,9 +5,9 @@ import hashlib
 import random
 from typing import Dict, List, Tuple, Optional, Callable
 
-from utils.schema import sft_row
+from utils.schema import sft_row, rag_row
 from utils.llm import NvidiaClient, KeyRotator
-from vi.processing import translate_rag_row, should_translate, log_translation_stats
+from vi.processing import should_translate
 
 # Logger
 logger = logging.getLogger("rag_processor")
@@ -188,18 +188,8 @@ class RAGProcessor:
                 if not question or not answer:
                     continue
                 
-                # Create RAG-specific instruction
-                rag_instruction = "Answer the medical question based on the provided context. If the context is insufficient, provide the best available medical information."
-                
-                # Format user input as QCA
-                if context:
-                    rag_user = f"Question: {question}\n\nContext: {context}"
-                else:
-                    rag_user = f"Question: {question}"
-                
-                # Commit the RAG-formatted row
-                if self._commit_rag_row(writer, source, rid, "rag_medical_qa", 
-                                      rag_instruction, rag_user, answer, 
+                # Commit the RAG-formatted row (QAC)
+                if self._commit_rag_row(writer, rid, question, context, answer,
                                       stats, dedupe_seen=dedupe_seen, translator=translator, opts=opts):
                     written += 1
                 
@@ -256,16 +246,8 @@ class RAGProcessor:
                     context = self.generate_context_from_qa(question, answer)
                 
                 rid = str(k)
-                rag_instruction = "Answer the biomedical question based on the provided context."
-                
-                if context:
-                    rag_user = f"Question: {question}\n\nContext: {context}"
-                else:
-                    rag_user = f"Question: {question}"
-                
-                # Commit the RAG-formatted row
-                if self._commit_rag_row(writer, source, rid, "rag_biomedical_qa", 
-                                      rag_instruction, rag_user, answer, 
+                # Commit the RAG-formatted row (QAC)
+                if self._commit_rag_row(writer, rid, question, context, answer,
                                       stats, dedupe_seen=dedupe_seen, translator=translator, opts=opts):
                     written += 1
                 
@@ -286,30 +268,28 @@ class RAGProcessor:
         logger.info(f"[RAG] {source} RAG processing done count={count} written={written}")
         return count
     
-    def _commit_rag_row(self, writer, source: str, rid: str, task: str, 
-                       instruction: str, user_input: str, output: str, 
+    def _commit_rag_row(self, writer, rid: str, question: str, context: str, answer: str, 
                        stats: Dict, dedupe_seen: set = None, translator=None, opts=None) -> bool:
-        """Commit a RAG-formatted row to the writer"""
+        """Commit a RAG-formatted row (QAC) to the writer"""
         # Simple deduplication based on content hash
         if dedupe_seen is not None:
-            content_hash = hashlib.md5(f"{user_input}{output}".encode()).hexdigest()
+            content_hash = hashlib.md5(f"{question}{context}{answer}".encode()).hexdigest()
             if content_hash in dedupe_seen:
                 stats["dedup_skipped"] = stats.get("dedup_skipped", 0) + 1
                 return False
             dedupe_seen.add(content_hash)
-        
-        meta = {"rag_processing": True, "format": "qca"}
-        row = sft_row(instruction, user_input, output, source=source, rid=rid, task=task, meta=meta)
-        
-        # Apply Vietnamese translation if requested
+
+        row = rag_row(question=question, context=context, answer=answer, rid=rid)
+
+        # Apply Vietnamese translation if requested (translate Q/A/C fields directly)
         if should_translate(opts.get("vietnamese_translation", False) if opts else False, translator):
             try:
-                row = translate_rag_row(row, translator)
-                meta["vietnamese_translated"] = True
-                row["meta"] = meta
+                if translator:
+                    row = translator.translate_dict(row, ["question", "answer", "context"])
+                    row["vi_translated"] = True
             except Exception as e:
                 logger.error(f"Failed to translate RAG row: {e}")
-        
+
         writer.write(row)
         stats["written"] = stats.get("written", 0) + 1
         return True

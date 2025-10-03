@@ -16,7 +16,7 @@ from utils.processor import process_file_into_sft
 from utils.rag import process_file_into_rag
 from utils.drive_saver import DriveSaver
 from utils.llm import Paraphraser
-from utils.schema import CentralisedWriter
+from utils.schema import CentralisedWriter, RAGWriter
 from utils.token import get_credentials, exchange_code, build_auth_url
 from vi.translator import VietnameseTranslator
 
@@ -71,14 +71,14 @@ STATE: Dict[str, object] = {
 
 class AugmentOptions(BaseModel):
     # ratios are 0..1
-    paraphrase_ratio: float = 0.0
-    paraphrase_outputs: bool = False
-    backtranslate_ratio: float = 0.0
+    paraphrase_ratio: float = 0.2
+    paraphrase_outputs: bool = True
+    backtranslate_ratio: float = 0.1
     style_standardize: bool = True
     deidentify: bool = True
     dedupe: bool = True
     max_chars: int = 5000                 # cap extremely long contexts
-    consistency_check_ratio: float = 0.0  # small ratio e.g. 0.01
+    consistency_check_ratio: float = 0.05  # small ratio e.g. 0.01
     # KD / distillation (optional, keeps default off)
     distill_fraction: float = 0.0         # for unlabeled only
     expand: bool = True                   # Enable back-translation and complex augmentation
@@ -178,15 +178,16 @@ def root():
               headers: {{ "Content-Type": "application/json" }},
               body: JSON.stringify({{
                 augment: {{
-                  paraphrase_ratio: 0.1,
-                  backtranslate_ratio: 0.00, // Increase to 0.05-0.1 for back-translation
-                  paraphrase_outputs: false,
+                  paraphrase_ratio: 0.2,
+                  backtranslate_ratio: 0.1,
+                  paraphrase_outputs: true,
                   style_standardize: true,
                   deidentify: true,
                   dedupe: true,
                   max_chars: 5000,
                   expand: true,
-                  max_aug_per_sample: 2
+                  max_aug_per_sample: 2,
+                  consistency_check_ratio: 0.05
                 }},
                 sample_limit: null,          // Sample down (currently disabled)
                 seed: 42,
@@ -382,7 +383,7 @@ def _run_job(dataset_key: str, params: ProcessParams):
         set_state(message="processing", progress=0.05)
 
         # Writer
-        writer = CentralisedWriter(jsonl_path=jsonl_path, csv_path=csv_path)
+        writer = RAGWriter(jsonl_path=jsonl_path, csv_path=csv_path) if params.rag_processing else CentralisedWriter(jsonl_path=jsonl_path, csv_path=csv_path)
         
         # Load translator if Vietnamese translation is requested
         translator = None
