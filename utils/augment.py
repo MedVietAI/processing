@@ -1,5 +1,6 @@
 # augmentation utility agent
 import re
+import difflib
 import random
 from typing import Dict, Tuple
 import ftfy
@@ -94,7 +95,21 @@ def maybe_backtranslate(text: str, ratio: float, paraphraser) -> Tuple[str, bool
     if ratio <= 0 or not text: return text, False
     if random.random() < ratio:
         bt = paraphraser.backtranslate(text, via_lang="vi")
-        return bt if bt else text, bool(bt)
+        if not bt:
+            return text, False
+        # Guardrails: reject if too short/long or too dissimilar/similar
+        try:
+            orig_len = max(1, len(text))
+            len_delta = abs(len(bt) - len(text)) / orig_len
+            sim = difflib.SequenceMatcher(None, text, bt).ratio()
+            # Accept if moderate change and not excessive drift
+            if len_delta > 0.5:
+                return text, False
+            if sim < 0.45 or sim > 0.98:
+                return text, False
+        except Exception:
+            pass
+        return bt, True
     return text, False
 
 def consistency_ok(user: str, out: str, ratio: float, paraphraser) -> bool:

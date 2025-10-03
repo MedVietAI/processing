@@ -44,7 +44,7 @@ class RAGProcessor:
         self.nvidia_client = NvidiaClient(KeyRotator("NVIDIA_API"), nvidia_model)
         
     def clean_conversational_content(self, text: str) -> str:
-        """Remove conversational elements and non-medical information using NVIDIA model"""
+        """Remove conversational elements and non-medical information using NVIDIA model; keep concise for embeddings."""
         if not text or len(text.strip()) < 10:
             return text
             
@@ -55,7 +55,7 @@ class RAGProcessor:
         3. Keep only medically relevant information
         4. Preserve clinical facts, symptoms, diagnoses, treatments, and medical advice
         5. Maintain professional medical language
-        6. Return only cleaned medical content, only plain text, no special characters, or formatting.
+        6. Return only cleaned medical content in 1-2 concise sentences suitable for dense retrieval embeddings. No lists, no headers.
 
         Text to clean:
         {text}
@@ -74,11 +74,11 @@ class RAGProcessor:
             return text
     
     def generate_context_from_qa(self, question: str, answer: str) -> str:
-        """Generate synthetic context from question and answer using NVIDIA model"""
+        """Generate synthetic, concise context (<=2 sentences) from question and answer, embedding-friendly."""
         if not question or not answer:
             return ""
             
-        prompt = f"""You are a medical knowledge expert. Given a medical question and its answer, generate a brief relevant medical context that would help someone understand the answer better. Write about 2 sentences that provide relevant background information. Use only plain text without any formatting or symbols.
+        prompt = f"""You are a medical knowledge expert. Given a medical question and its answer, generate a brief relevant medical context that helps retrieval. Limit to 1–2 sentences, concise, avoid boilerplate, no enumerations.
 
         Question: {question}
 
@@ -92,16 +92,20 @@ class RAGProcessor:
                 temperature=0.2,
                 max_tokens=200
             )
-            return context.strip() if context else ""
+            # Trim to a single short paragraph
+            return (context or "").strip().split("\n")[0][:600]
         except Exception as e:
             logger.warning(f"[RAG] Error generating context: {e}")
             return ""
     
     def convert_to_qca_format(self, instruction: str, user_input: str, output: str) -> Tuple[str, str, str]:
-        """Convert SFT format to QCA (Question, Context, Answer) format"""
+        """Convert SFT format to QCA (Question, Context, Answer) format, compressing for embedding suitability."""
         # Clean the content to remove conversational elements
         cleaned_input = self.clean_conversational_content(user_input)
         cleaned_output = self.clean_conversational_content(output)
+        # Hard caps for embedding friendliness
+        cleaned_input = (cleaned_input or "")[:1200]
+        cleaned_output = (cleaned_output or "")[:1200]
         
         # Extract question from user input
         question = self.extract_question(cleaned_input)
@@ -110,7 +114,8 @@ class RAGProcessor:
         context = self.extract_context(cleaned_input, question, cleaned_output)
         
         # Clean answer
-        answer = cleaned_output
+        # Prefer short, direct answers
+        answer = cleaned_output[:800]
         
         return question, context, answer
     
