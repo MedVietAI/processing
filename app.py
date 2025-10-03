@@ -155,7 +155,7 @@ def root():
         <ul>
           <li><a href="/status" target="_blank">Check current job status</a></li>
           <li><a href="/files" target="_blank">List generated artifacts</a></li>
-          <li><a href="https://binkhoale1812-medai-processing.hf.space/oauth2/start" target="_blank">Authorize your GCS credential</a></li>
+          <li><a href="https://medvietai-processing.hf.space/oauth2/start" target="_blank">Authorize your GCS credential</a></li>
           <li><a href="https://huggingface.co/spaces/BinKhoaLe1812/MedAI_Processing/blob/main/REQUEST.md" target="_blank">📑 Request Doc (all curl examples)</a></li>
         </ul>
       </div>
