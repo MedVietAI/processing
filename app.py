@@ -54,7 +54,7 @@ paraphraser = Paraphraser(
     gemini_model_hard=os.getenv("GEMINI_MODEL_HARD", "gemini-2.5-flash"),
 )
 
-# Vietnamese translator
+# Vietnamese translator (currently using Helsinki-NLP/opus-mt-en-vi)
 vietnamese_translator = VietnameseTranslator()
 
 app = FastAPI(title="Medical Dataset Augmenter", version="1.1.0")
