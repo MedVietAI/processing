@@ -11,3 +11,5 @@ google-auth-oauthlib
 orjson
 ftfy
 langid
+transformers
+torch

@@ -7,6 +7,7 @@ from typing import Callable, Optional, Dict, Tuple
 
 from utils.schema import sft_row
 from utils import augment as A
+from vi.processing import translate_sft_row, should_translate, log_translation_stats
 
 # Logger
 logger = logging.getLogger("processor")
@@ -40,7 +41,8 @@ def process_file_into_sft(
     augment_opts: Dict,
     sample_limit: Optional[int],
     seed: int,
-    progress_cb: Optional[Callable[[float, str], None]]
+    progress_cb: Optional[Callable[[float, str], None]],
+    translator=None
 ) -> Tuple[int, Dict]:
     random.seed(seed)
     stats = {
@@ -68,13 +70,13 @@ def process_file_into_sft(
     if key in ("healthcaremagic", "icliniq"):
         count = _proc_med_dialog(source=key, path=input_path, writer=writer,
                                  paraphraser=paraphraser, opts=augment_opts,
-                                 sample_limit=sample_limit, stats=stats, cb=progress_cb, dedupe_seen=dedupe_seen)
+                                 sample_limit=sample_limit, stats=stats, cb=progress_cb, dedupe_seen=dedupe_seen, translator=translator)
     elif key == "pubmedqa_l":
-        count = _proc_pubmedqa_l(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen)
+        count = _proc_pubmedqa_l(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen, translator=translator)
     elif key == "pubmedqa_u":
-        count = _proc_pubmedqa_u(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen)
+        count = _proc_pubmedqa_u(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen, translator=translator)
     elif key == "pubmedqa_map":
-        count = _proc_pubmedqa_map(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen)
+        count = _proc_pubmedqa_map(input_path, writer, paraphraser, augment_opts, sample_limit, stats, progress_cb, dedupe_seen=dedupe_seen, translator=translator)
     else:
         raise ValueError(f"Unknown dataset: {dataset_key}")
     logger.info(f"[PROC] End dataset={dataset_key} stats={stats}")
@@ -135,7 +137,7 @@ def _apply_aug(instr: str, user: str, out: str, source: str, opts: Dict, paraphr
 
     return instr, user, out, applied
 
-def _commit_row(writer, source, rid, task, instr, user, out, opts, stats, aug_applied, extra_meta=None, dedupe_seen=None):
+def _commit_row(writer, source, rid, task, instr, user, out, opts, stats, aug_applied, extra_meta=None, dedupe_seen=None, translator=None):
     # Dedup entry
     if dedupe_seen is not None:
         fp = A.fingerprint(instr, user, out)
@@ -149,13 +151,23 @@ def _commit_row(writer, source, rid, task, instr, user, out, opts, stats, aug_ap
         meta.update(extra_meta)
 
     row = sft_row(instr, user, out, source=source, rid=rid, task=task, meta=meta)
+    
+    # Apply Vietnamese translation if requested
+    if should_translate(opts.get("vietnamese_translation", False), translator):
+        try:
+            row = translate_sft_row(row, translator)
+            meta["vietnamese_translated"] = True
+            row["meta"] = meta
+        except Exception as e:
+            logger.error(f"Failed to translate SFT row: {e}")
+    
     writer.write(row)
     stats["written"] += 1
     return True
 
 # ——————————— dataset processors ———————————
 
-def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None):
+def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None, translator=None):
     count = 0
     written = 0
     for i, obj in enumerate(_iter_json_or_jsonl(path), start=1):
@@ -184,12 +196,12 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 applied.append("consistency_flag")
 
             # 2) If expansion is enabled, add augmented copies
-            _commit_row(writer, source, rid, "medical_dialogue", instr, user, out, opts, stats, ["base"] + applied, dedupe_seen=dedupe_seen)
+            _commit_row(writer, source, rid, "medical_dialogue", instr, user, out, opts, stats, ["base"] + applied, dedupe_seen=dedupe_seen, translator=translator)
             # Add augmented copies if expand
             if opts.get("expand", True):
                 for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
                     rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
-                    _commit_row(writer, source, rid_aug, "medical_dialogue", instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen)
+                    _commit_row(writer, source, rid_aug, "medical_dialogue", instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             
             # Increment count only on success
             count += 1
@@ -205,7 +217,7 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
     logger.info(f"[PROC] {source} done count={count} written={stats['written']} dedup_skipped={stats['dedup_skipped']}")
     return count
 
-def _proc_pubmedqa_l(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None):
+def _proc_pubmedqa_l(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None, translator=None):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     count = 0
@@ -236,12 +248,12 @@ def _proc_pubmedqa_l(path, writer, paraphraser, opts, sample_limit, stats, cb, d
 
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_l", opts, paraphraser, stats)
             _commit_row(writer, "pubmedqa_l", rid, "biomedical_qa", instr, user, out, opts, stats, applied,
-                        extra_meta={"year": v.get("YEAR"), "meshes": v.get("MESHES"), "labels": v.get("LABELS")}, dedupe_seen=dedupe_seen)
+                        extra_meta={"year": v.get("YEAR"), "meshes": v.get("MESHES"), "labels": v.get("LABELS")}, dedupe_seen=dedupe_seen, translator=translator)
             if opts.get("expand", True):
                 for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
                     rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_l", rid_aug, "biomedical_qa",
-                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen)
+                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
 
             # Increment count only on success
             count += 1
@@ -257,7 +269,7 @@ def _proc_pubmedqa_l(path, writer, paraphraser, opts, sample_limit, stats, cb, d
     logger.info(f"[PROC] pubmedqa_l done count={count} written={stats['written']} dedup_skipped={stats['dedup_skipped']}")
     return count
 
-def _proc_pubmedqa_u(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None):
+def _proc_pubmedqa_u(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None, translator=None):
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
     count = 0
@@ -290,12 +302,12 @@ def _proc_pubmedqa_u(path, writer, paraphraser, opts, sample_limit, stats, cb, d
                     out = guess.strip()
 
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_u", opts, paraphraser, stats)
-            _commit_row(writer, "pubmedqa_u", str(k), "biomedical_qa_unlabeled", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen)
+            _commit_row(writer, "pubmedqa_u", str(k), "biomedical_qa_unlabeled", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen, translator=translator)
             if opts.get("expand", True):
                 for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
                     rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_u", rid_aug, "biomedical_qa",
-                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen)
+                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             
             # Increment count only on success
             count += 1
@@ -311,7 +323,7 @@ def _proc_pubmedqa_u(path, writer, paraphraser, opts, sample_limit, stats, cb, d
     logger.info(f"[PROC] pubmedqa_u done count={count} written={stats['written']} dedup_skipped={stats['dedup_skipped']}")
     return count
 
-def _proc_pubmedqa_map(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None):
+def _proc_pubmedqa_map(path, writer, paraphraser, opts, sample_limit, stats, cb, dedupe_seen=None, translator=None):
     with open(path, "r", encoding="utf-8") as f:
         obj = json.load(f)
     
@@ -383,14 +395,14 @@ def _proc_pubmedqa_map(path, writer, paraphraser, opts, sample_limit, stats, cb,
 
             # Process the item
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_map", opts, paraphraser, stats)
-            _commit_row(writer, "pubmedqa_map", rid, "biomedical_qa", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen)
+            _commit_row(writer, "pubmedqa_map", rid, "biomedical_qa", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen, translator=translator)
             
             # Handle expansion if enabled
             if opts.get("expand", True):
                 for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
                     rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_map", rid_aug, "biomedical_qa",
-                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen)
+                                instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             
             # Increment count only on success
             count += 1

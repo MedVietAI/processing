@@ -18,6 +18,7 @@ from utils.drive_saver import DriveSaver
 from utils.llm import Paraphraser
 from utils.schema import CentralisedWriter
 from utils.token import get_credentials, exchange_code, build_auth_url
+from vi.translator import VietnameseTranslator
 
 # ────────── Log ───────────
 logger = logging.getLogger("app")
@@ -53,6 +54,9 @@ paraphraser = Paraphraser(
     gemini_model_hard=os.getenv("GEMINI_MODEL_HARD", "gemini-2.5-flash"),
 )
 
+# Vietnamese translator
+vietnamese_translator = VietnameseTranslator()
+
 app = FastAPI(title="Medical Dataset Augmenter", version="1.1.0")
 
 STATE_LOCK = threading.Lock()
@@ -85,6 +89,7 @@ class ProcessParams(BaseModel):
     sample_limit: Optional[int] = None    # Set data sampling if needed 
     seed: int = 42
     rag_processing: bool = False          # Enable RAG-specific processing
+    vietnamese_translation: bool = False  # Enable Vietnamese translation
 
 def set_state(**kwargs):
     with STATE_LOCK:
@@ -122,6 +127,14 @@ def root():
       <div class="section">
         <h2>⚡ Quick Actions</h2>
         <p>Click a button below to start processing a dataset with default augmentation parameters.</p>
+        
+        <div style="margin-bottom: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; border-left: 4px solid #2d89ef;">
+          <label style="display: flex; align-items: center; cursor: pointer;">
+            <input type="checkbox" id="vietnameseTranslation" style="margin-right: 8px; transform: scale(1.2);">
+            <strong>🇻🇳 Vietnamese Translation</strong> - Translate all content to Vietnamese before processing
+          </label>
+        </div>
+        
         <button onclick="startJob('healthcaremagic')">▶ProcAugment HealthCareMagic (100k)</button><br>
         <button onclick="startJob('icliniq')">▶ProcAugment iCliniq (10k-derived)</button><br>
         <button onclick="startJob('pubmedqa_l')">▶ProcAugment PubMedQA (Labelled)</button><br>
@@ -155,10 +168,10 @@ def root():
       <script>
         async function startJob(dataset) {{
           const log = document.getElementById("log");
-          const ragToggle = document.getElementById("ragToggle");
-          const isRagMode = ragToggle.checked;
+          const vietnameseToggle = document.getElementById("vietnameseTranslation");
+          const isVietnameseMode = vietnameseToggle.checked;
           
-          log.innerHTML = "⏳ Starting " + (isRagMode ? "RAG " : "") + "job for <b>" + dataset + "</b>...";
+          log.innerHTML = "⏳ Starting job for <b>" + dataset + "</b>" + (isVietnameseMode ? " with Vietnamese translation" : "") + "...";
           try {{
             const resp = await fetch("/process/" + dataset, {{
               method: "POST",
@@ -177,7 +190,8 @@ def root():
                 }},
                 sample_limit: null,          // Sample down (currently disabled)
                 seed: 42,
-                rag_processing: isRagMode
+                rag_processing: false,
+                vietnamese_translation: isVietnameseMode
               }})
             }});
             const data = await resp.json();
@@ -193,14 +207,18 @@ def root():
         
         async function startRagJob(dataset) {{
           const log = document.getElementById("log");
-          log.innerHTML = "⏳ Starting RAG processing for <b>" + dataset + "</b>...";
+          const vietnameseToggle = document.getElementById("vietnameseTranslation");
+          const isVietnameseMode = vietnameseToggle.checked;
+          
+          log.innerHTML = "⏳ Starting RAG processing for <b>" + dataset + "</b>" + (isVietnameseMode ? " with Vietnamese translation" : "") + "...";
           try {{
             const resp = await fetch("/rag/" + dataset, {{
               method: "POST",
               headers: {{ "Content-Type": "application/json" }},
               body: JSON.stringify({{
                 sample_limit: null,
-                seed: 42
+                seed: 42,
+                vietnamese_translation: isVietnameseMode
               }})
             }});
             const data = await resp.json();
@@ -366,6 +384,18 @@ def _run_job(dataset_key: str, params: ProcessParams):
         # Writer
         writer = CentralisedWriter(jsonl_path=jsonl_path, csv_path=csv_path)
         
+        # Load translator if Vietnamese translation is requested
+        translator = None
+        if params.vietnamese_translation:
+            set_state(message="Loading Vietnamese translator", progress=0.05)
+            try:
+                vietnamese_translator.load_model()
+                translator = vietnamese_translator
+                logger.info("✅ Vietnamese translator loaded successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to load Vietnamese translator: {e}")
+                set_state(message=f"Warning: Vietnamese translation failed - {e}", progress=0.1)
+        
         if params.rag_processing:
             # RAG processing mode
             set_state(message="RAG processing", progress=0.1)
@@ -376,20 +406,26 @@ def _run_job(dataset_key: str, params: ProcessParams):
                 nvidia_model=os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct"),
                 sample_limit=params.sample_limit,
                 seed=params.seed,
-                progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"])
+                progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"]),
+                translator=translator
             )
         else:
             # Standard SFT processing mode
             set_state(message="SFT processing", progress=0.1)
+            # Add Vietnamese translation flag to augment options
+            augment_opts = params.augment.dict()
+            augment_opts["vietnamese_translation"] = params.vietnamese_translation
+            
             count, stats = process_file_into_sft(
                 dataset_key=dataset_key,
                 input_path=local_path,
                 writer=writer,
                 paraphraser=paraphraser,
-                augment_opts=params.augment.dict(),
+                augment_opts=augment_opts,
                 sample_limit=params.sample_limit,
                 seed=params.seed,
-                progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"])
+                progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"]),
+                translator=translator
             )
         logger.info(f"[JOB] Processed dataset={dataset_key} rows={count} stats={stats}")
         writer.close()

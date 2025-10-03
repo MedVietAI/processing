@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional, Callable
 
 from utils.schema import sft_row
 from utils.llm import NvidiaClient, KeyRotator
+from vi.processing import translate_rag_row, should_translate, log_translation_stats
 
 # Logger
 logger = logging.getLogger("rag_processor")
@@ -165,7 +166,7 @@ class RAGProcessor:
         return ""
     
     def process_medical_dialog(self, source: str, path: str, writer, sample_limit: Optional[int], 
-                             stats: Dict, progress_cb: Optional[Callable], dedupe_seen: set = None) -> int:
+                             stats: Dict, progress_cb: Optional[Callable], dedupe_seen: set = None, translator=None, opts=None) -> int:
         """Process medical dialogue datasets into RAG format"""
         count = 0
         written = 0
@@ -199,7 +200,7 @@ class RAGProcessor:
                 # Commit the RAG-formatted row
                 if self._commit_rag_row(writer, source, rid, "rag_medical_qa", 
                                       rag_instruction, rag_user, answer, 
-                                      stats, dedupe_seen=dedupe_seen):
+                                      stats, dedupe_seen=dedupe_seen, translator=translator, opts=opts):
                     written += 1
                 
                 count += 1
@@ -220,7 +221,7 @@ class RAGProcessor:
         return count
     
     def process_pubmedqa(self, source: str, path: str, writer, sample_limit: Optional[int], 
-                        stats: Dict, progress_cb: Optional[Callable], dedupe_seen: set = None) -> int:
+                        stats: Dict, progress_cb: Optional[Callable], dedupe_seen: set = None, translator=None, opts=None) -> int:
         """Process PubMedQA datasets into RAG format"""
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -265,7 +266,7 @@ class RAGProcessor:
                 # Commit the RAG-formatted row
                 if self._commit_rag_row(writer, source, rid, "rag_biomedical_qa", 
                                       rag_instruction, rag_user, answer, 
-                                      stats, dedupe_seen=dedupe_seen):
+                                      stats, dedupe_seen=dedupe_seen, translator=translator, opts=opts):
                     written += 1
                 
                 count += 1
@@ -287,7 +288,7 @@ class RAGProcessor:
     
     def _commit_rag_row(self, writer, source: str, rid: str, task: str, 
                        instruction: str, user_input: str, output: str, 
-                       stats: Dict, dedupe_seen: set = None) -> bool:
+                       stats: Dict, dedupe_seen: set = None, translator=None, opts=None) -> bool:
         """Commit a RAG-formatted row to the writer"""
         # Simple deduplication based on content hash
         if dedupe_seen is not None:
@@ -299,6 +300,16 @@ class RAGProcessor:
         
         meta = {"rag_processing": True, "format": "qca"}
         row = sft_row(instruction, user_input, output, source=source, rid=rid, task=task, meta=meta)
+        
+        # Apply Vietnamese translation if requested
+        if should_translate(opts.get("vietnamese_translation", False) if opts else False, translator):
+            try:
+                row = translate_rag_row(row, translator)
+                meta["vietnamese_translated"] = True
+                row["meta"] = meta
+            except Exception as e:
+                logger.error(f"Failed to translate RAG row: {e}")
+        
         writer.write(row)
         stats["written"] = stats.get("written", 0) + 1
         return True
@@ -310,7 +321,8 @@ def process_file_into_rag(
     nvidia_model: str,
     sample_limit: Optional[int],
     seed: int,
-    progress_cb: Optional[Callable[[float, str], None]]
+    progress_cb: Optional[Callable[[float, str], None]],
+    translator=None
 ) -> Tuple[int, Dict]:
     """Main entry point for RAG processing"""
     random.seed(seed)
@@ -326,17 +338,20 @@ def process_file_into_rag(
     dedupe_seen = set()
     
     key = dataset_key.lower()
+    # Create opts with Vietnamese translation flag
+    opts = {"vietnamese_translation": translator is not None}
+    
     if key in ("healthcaremagic", "icliniq"):
         count = rag_processor.process_medical_dialog(
             source=key, path=input_path, writer=writer,
             sample_limit=sample_limit, stats=stats, 
-            progress_cb=progress_cb, dedupe_seen=dedupe_seen
+            progress_cb=progress_cb, dedupe_seen=dedupe_seen, translator=translator, opts=opts
         )
     elif key in ("pubmedqa_l", "pubmedqa_u", "pubmedqa_map"):
         count = rag_processor.process_pubmedqa(
             source=key, path=input_path, writer=writer,
             sample_limit=sample_limit, stats=stats, 
-            progress_cb=progress_cb, dedupe_seen=dedupe_seen
+            progress_cb=progress_cb, dedupe_seen=dedupe_seen, translator=translator, opts=opts
         )
     else:
         raise ValueError(f"Unknown dataset for RAG processing: {dataset_key}")

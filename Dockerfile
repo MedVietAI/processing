@@ -16,6 +16,9 @@ RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 # Copy the application
 COPY --chown=user . .
 
+# Download Vietnamese translation model
+RUN python vi/download.py
+
 # Hugging Face cache setup
 ENV HF_HOME="$HOME/.cache/huggingface"
 ENV SENTENCE_TRANSFORMERS_HOME="$HOME/.cache/huggingface/sentence-transformers"

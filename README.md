@@ -1,32 +1,32 @@
 ---
-title: MedAI Processing
+title: MedVietAI Processing
 emoji: ⚕️
-colorFrom: indigo
-colorTo: blue
+colorFrom: green
+colorTo: pink
 sdk: docker
 pinned: false
 license: apache-2.0
-short_description: Process and centralise medical doc for llm finetuning
+short_description: Data processing with en-vi translation. Derived from 500k mi
 ---
 
 ## Quick Access:
 
-[HF Space](https://huggingface.co/spaces/BinKhoaLe1812/MedAI_Processing)
+[HF Space](https://huggingface.co/spaces/MedVietAI/processing)
 
-[MedDialog-100k](https://huggingface.co/datasets/BinKhoaLe1812/MedDialog-EN-100k)
+[MedDialog-100k](https://huggingface.co/datasets/MedAI-COS30018/MedDialog-EN-100k)
 
-[MedDialog-100k](https://huggingface.co/datasets/BinKhoaLe1812/MedDialog-EN-10k)
+[MedDialog-100k](https://huggingface.co/datasets/MedAI-COS30018/MedDialog-EN-10k)
 
-[PubMedQA-Labelled](https://huggingface.co/datasets/BinKhoaLe1812/PubMedQA-L)
+[PubMedQA-Labelled](https://huggingface.co/datasets/MedAI-COS30018/PubMedQA-L)
 
-[PubMedQA-Unlabelled](https://huggingface.co/datasets/BinKhoaLe1812/PubMedQA-U)
+[PubMedQA-Unlabelled](https://huggingface.co/datasets/MedAI-COS30018/PubMedQA-U)
 
-[PubMedQA-Mapper](https://huggingface.co/datasets/BinKhoaLe1812/PubMedQA-MAP)
+[PubMedQA-Mapper](https://huggingface.co/datasets/MedAI-COS30018/PubMedQA-MAP)
 
 
 ## CURL Request Instruction
-[Request Doc](https://huggingface.co/spaces/MedAI-COS30018/MedAI_Processing/blob/main/REQUEST.md)
+[Request Doc](https://huggingface.co/spaces/MedVietAI/processing/blob/main/REQUEST.md)
 
 ## License
-[Apache-2.0 LICENSE](https://huggingface.co/spaces/MedAI-COS30018/MedAI_Processing/blob/main/LICENSE.txt)
+[Apache-2.0 LICENSE](https://huggingface.co/spaces/MedVietAI/processing/blob/main/LICENSE.txt)
 
