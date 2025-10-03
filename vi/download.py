@@ -9,6 +9,7 @@ import os
 import sys
 import logging
 from pathlib import Path
+import torch
 from transformers import MarianMTModel, MarianTokenizer
 
 # Setup logging
@@ -56,7 +57,8 @@ def download_model(model_name: str = "Helsinki-NLP/opus-mt-en-vi", cache_dir: st
         logger.info("Testing model...")
         test_text = "Hello, how are you?"
         inputs = tokenizer(f">>vie<< {test_text}", return_tensors="pt")
-        with model.eval():
+        model.eval()
+        with torch.no_grad():
             outputs = model.generate(**inputs, max_length=50, num_beams=4)
         translated = tokenizer.decode(outputs[0], skip_special_tokens=True)
         logger.info(f"Test translation: '{test_text}' -> '{translated}'")

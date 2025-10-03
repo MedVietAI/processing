@@ -13,3 +13,5 @@ ftfy
 langid
 transformers
 torch
+sentencepiece
+sacremoses
