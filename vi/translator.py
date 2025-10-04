@@ -31,6 +31,7 @@ class VietnameseTranslator:
         self.model = None
         self.tokenizer = None
         self._is_loaded = False
+        self._stats = {"total_translations": 0, "successful_translations": 0, "failed_translations": 0}
         
         logger.info(f"VietnameseTranslator initialized with model: {self.model_name}")
         logger.info(f"Using device: {self.device}")
@@ -101,6 +102,8 @@ class VietnameseTranslator:
             return text
         
         try:
+            self._stats["total_translations"] += 1
+            
             # Prepare input with target language token
             # The model requires a target language token in the format >>id<<
             input_text = f">>vie<< {text.strip()}"
@@ -130,10 +133,13 @@ class VietnameseTranslator:
             logger.debug(f"Translation result: '{text[:50]}...' -> '{translated[:50]}...'")
             logger.debug(f"Are original and translated the same? {text.strip() == translated.strip()}")
             
+            # Track success
+            self._stats["successful_translations"] += 1
             return translated.strip()
             
         except Exception as e:
             logger.error(f"Translation failed for text: '{text[:100]}...' - Error: {e}")
+            self._stats["failed_translations"] += 1
             # Return original text if translation fails
             return text
     
@@ -270,3 +276,11 @@ class VietnameseTranslator:
             "device": self.device,
             "is_loaded": self._is_loaded
         }
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Get translation statistics."""
+        return self._stats.copy()
+    
+    def reset_stats(self) -> None:
+        """Reset translation statistics."""
+        self._stats = {"total_translations": 0, "successful_translations": 0, "failed_translations": 0}

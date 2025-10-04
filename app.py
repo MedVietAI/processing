@@ -390,12 +390,20 @@ def _run_job(dataset_key: str, params: ProcessParams):
         if params.vietnamese_translation:
             set_state(message="Loading Vietnamese translator", progress=0.05)
             try:
+                # Ensure cache directories are set up properly
+                cache_dir = os.path.abspath("cache/huggingface")
+                os.makedirs(cache_dir, exist_ok=True)
+                os.environ["HF_HOME"] = cache_dir
+                
                 vietnamese_translator.load_model()
                 translator = vietnamese_translator
                 logger.info("✅ Vietnamese translator loaded successfully")
             except Exception as e:
                 logger.error(f"❌ Failed to load Vietnamese translator: {e}")
-                set_state(message=f"Warning: Vietnamese translation failed - {e}", progress=0.1)
+                logger.warning("Continuing without Vietnamese translation...")
+                set_state(message=f"Warning: Vietnamese translation disabled - {e}", progress=0.1)
+                # Don't fail the entire job, just disable translation
+                translator = None
         
         if params.rag_processing:
             # RAG processing mode
@@ -429,6 +437,12 @@ def _run_job(dataset_key: str, params: ProcessParams):
                 progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"]),
                 translator=translator
             )
+        # Log translation statistics if translator was used
+        if translator and hasattr(translator, 'get_stats'):
+            translation_stats = translator.get_stats()
+            logger.info(f"[JOB] Translation stats: {translation_stats}")
+            stats["translation_stats"] = translation_stats
+        
         logger.info(f"[JOB] Processed dataset={dataset_key} rows={count} stats={stats}")
         writer.close()
 

@@ -309,9 +309,13 @@ class RAGProcessor:
         if should_translate(opts.get("vietnamese_translation", False) if opts else False, translator):
             try:
                 row = translate_rag_row(row, translator, ["question", "answer", "context"])
-                row["vi_translated"] = True
+                # Add translation metadata
+                if "meta" not in row:
+                    row["meta"] = {}
+                row["meta"]["vietnamese_translated"] = True
             except Exception as e:
                 logger.error(f"Failed to translate RAG row: {e}")
+                # Continue with original row if translation fails
 
         writer.write(row)
         stats["written"] = stats.get("written", 0) + 1
