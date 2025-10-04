@@ -6,7 +6,7 @@ colorTo: pink
 sdk: docker
 pinned: false
 license: apache-2.0
-short_description: Advanced medical data processing with Vietnamese translation, data augmentation, and quality validation
+short_description: Data processing with en-vi translation. Derived from 500k mi
 ---
 
 ## 🚀 Quick Access
