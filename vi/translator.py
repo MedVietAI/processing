@@ -127,7 +127,9 @@ class VietnameseTranslator:
             # Decode
             translated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            logger.debug(f"Translated: '{text[:50]}...' -> '{translated[:50]}...'")
+            logger.debug(f"Translation result: '{text[:50]}...' -> '{translated[:50]}...'")
+            logger.debug(f"Are original and translated the same? {text.strip() == translated.strip()}")
+            
             return translated.strip()
             
         except Exception as e:

@@ -104,12 +104,20 @@ def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = 
                     original = sft_data[field]
                     translated = translator.translate_text(original)
                     
+                    # Debug logging
+                    logger.debug(f"Translation attempt for field '{field}':")
+                    logger.debug(f"  Original: '{original[:50]}...'")
+                    logger.debug(f"  Translated: '{translated[:50]}...'")
+                    logger.debug(f"  Are they the same? {original == translated}")
+                    
                     # Validate and sanitize translated field
                     if _validate_vi_translation(original, translated):
                         translated_sft[field] = _vi_sanitize_text(translated)
-                        logger.debug(f"Translated field '{field}': '{original[:50]}...' -> '{translated[:50]}...'")
+                        logger.debug(f"✅ Successfully translated field '{field}'")
                     else:
-                        logger.warning(f"Invalid Vietnamese translation for field {field}, keeping original")
+                        logger.warning(f"❌ Invalid Vietnamese translation for field {field}, keeping original")
+                        logger.warning(f"  Original: '{original[:50]}...'")
+                        logger.warning(f"  Translated: '{translated[:50]}...'")
                         translated_sft[field] = original
                 except Exception as e:
                     logger.error(f"Failed to translate field '{field}': {e}")
