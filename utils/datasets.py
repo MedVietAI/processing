@@ -49,12 +49,22 @@ def hf_download_dataset(repo_id: str, filename: str, repo_type: str = "dataset")
     logger.info(
         f"[HF] Download {repo_id}/{filename} (type={repo_type}) token={'yes' if token else 'no'}"
     )
+    
+    # Set cache directory with proper permissions
+    cache_dir = os.path.abspath("cache/hf")
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    # Set HF_HOME to avoid permission issues
+    hf_home = os.path.abspath("cache/huggingface")
+    os.makedirs(hf_home, exist_ok=True)
+    os.environ["HF_HOME"] = hf_home
+    
     path = hf_hub_download(
         repo_id=repo_id,
         filename=filename,
         repo_type=repo_type,
         token=token,
-        local_dir=os.path.abspath("cache/hf"),
+        local_dir=cache_dir,
         local_dir_use_symlinks=False
     )
     try:

@@ -36,28 +36,39 @@ def _validate_vi_translation(original: str, translated: str) -> bool:
     if not translated or not isinstance(translated, str):
         return False
     
-    # Check if translation is too short or too different in length
+    # Check if translation is too short
     if len(translated.strip()) < 3:
         return False
     
-    # Check if translation contains too much English (should be mostly Vietnamese)
-    import re
-    english_chars = len(re.findall(r'[a-zA-Z]', translated))
-    total_chars = len(re.sub(r'\s', '', translated))
-    if total_chars > 0 and english_chars / total_chars > 0.7:
+    # If translation is identical to original, it's not a valid translation
+    if translated.strip() == original.strip():
         return False
     
     # Check for common translation failure patterns
     failure_patterns = [
-        "translation", "error", "failed", "unable", "cannot",
-        "not available", "not found", "invalid", "error"
+        "translation error", "translation failed", "unable to translate", 
+        "cannot translate", "not available", "not found", "invalid translation"
     ]
     translated_lower = translated.lower()
     for pattern in failure_patterns:
         if pattern in translated_lower:
             return False
     
-    return True
+    # Check if translation contains Vietnamese characters (basic check)
+    import re
+    vietnamese_chars = len(re.findall(r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]', translated, re.IGNORECASE))
+    total_chars = len(re.sub(r'\s', '', translated))
+    
+    # If there are Vietnamese characters, it's likely a valid translation
+    if vietnamese_chars > 0:
+        return True
+    
+    # If no Vietnamese characters but significantly different from original, accept it
+    # (some translations might not have Vietnamese diacritics)
+    if len(translated) > len(original) * 0.5 and len(translated) < len(original) * 2.0:
+        return True
+    
+    return False
 
 def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = None) -> Dict[str, Any]:
     """
@@ -80,17 +91,36 @@ def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = 
         text_fields = ["instruction", "input", "output"]
     
     try:
-        translated_row = translator.translate_dict(row, text_fields)
-        # Validate and sanitize translated fields
-        for f in text_fields:
-            if f in translated_row.get("sft", {}):
-                original = row.get("sft", {}).get(f, "")
-                translated = translated_row["sft"][f]
-                if _validate_vi_translation(original, translated):
-                    translated_row["sft"][f] = _vi_sanitize_text(translated)
-                else:
-                    logger.warning(f"Invalid Vietnamese translation for field {f}, keeping original")
-                    translated_row["sft"][f] = original
+        # Create a copy of the row to avoid modifying the original
+        translated_row = row.copy()
+        
+        # Translate the SFT fields directly
+        sft_data = row.get("sft", {})
+        translated_sft = {}
+        
+        for field in text_fields:
+            if field in sft_data and isinstance(sft_data[field], str) and sft_data[field].strip():
+                try:
+                    original = sft_data[field]
+                    translated = translator.translate_text(original)
+                    
+                    # Validate and sanitize translated field
+                    if _validate_vi_translation(original, translated):
+                        translated_sft[field] = _vi_sanitize_text(translated)
+                        logger.debug(f"Translated field '{field}': '{original[:50]}...' -> '{translated[:50]}...'")
+                    else:
+                        logger.warning(f"Invalid Vietnamese translation for field {field}, keeping original")
+                        translated_sft[field] = original
+                except Exception as e:
+                    logger.error(f"Failed to translate field '{field}': {e}")
+                    translated_sft[field] = sft_data[field]
+            else:
+                # Keep original if field doesn't exist or is empty
+                translated_sft[field] = sft_data.get(field, "")
+        
+        # Update the translated row
+        translated_row["sft"] = translated_sft
+        
         logger.debug(f"Translated SFT row with fields: {text_fields}")
         return translated_row
     except Exception as e:

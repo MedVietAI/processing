@@ -57,16 +57,20 @@ class VietnameseTranslator:
             logger.info(f"Loading translation model: {self.model_name}")
             logger.info(f"Loading on device: {self.device}")
             
+            # Set up cache directory
+            cache_dir = os.getenv("HF_HOME", os.path.abspath("cache/huggingface"))
+            os.makedirs(cache_dir, exist_ok=True)
+            
             # Load tokenizer
             self.tokenizer = MarianTokenizer.from_pretrained(
                 self.model_name,
-                cache_dir=os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+                cache_dir=cache_dir
             )
             
             # Load model
             self.model = MarianMTModel.from_pretrained(
                 self.model_name,
-                cache_dir=os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
+                cache_dir=cache_dir
             )
             
             # Move model to device
