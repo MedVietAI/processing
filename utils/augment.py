@@ -118,3 +118,52 @@ def consistency_ok(user: str, out: str, ratio: float, paraphraser) -> bool:
     if random.random() >= ratio:
         return True
     return paraphraser.consistency_check(user, out)
+
+def is_invalid_response(text: str) -> bool:
+    """Check if model response is invalid (Fail, Invalid, etc.)"""
+    if not text or not isinstance(text, str):
+        return True
+    
+    text_lower = text.lower().strip()
+    invalid_patterns = [
+        "fail", "invalid", "i couldn't", "i can't", "i cannot", "unable to",
+        "sorry", "error", "not available", "no answer", "insufficient",
+        "don't know", "do not know", "not sure", "cannot determine",
+        "unable to provide", "not possible", "not applicable", "n/a"
+    ]
+    
+    # Check if response is too short or matches invalid patterns
+    if len(text_lower) < 3:
+        return True
+    
+    for pattern in invalid_patterns:
+        if pattern in text_lower:
+            return True
+    
+    return False
+
+def clean_invalid_response(text: str, fallback: str = "") -> str:
+    """Clean invalid responses by returning fallback or empty string"""
+    if is_invalid_response(text):
+        return fallback
+    return text
+
+def retry_invalid_response(text: str, paraphraser, max_retries: int = 3) -> str:
+    """Retry generating valid response for invalid text, max 3 retries"""
+    if not is_invalid_response(text):
+        return text
+    
+    for attempt in range(max_retries):
+        try:
+            # Try paraphrasing with different difficulty levels
+            difficulty = "easy" if attempt == 0 else "hard" if attempt == 1 else "easy"
+            retry_text = paraphraser.paraphrase(text, difficulty=difficulty)
+            
+            if retry_text and not is_invalid_response(retry_text):
+                return retry_text
+        except Exception as e:
+            logger.warning(f"Retry attempt {attempt + 1} failed: {e}")
+            continue
+    
+    # If all retries failed, return empty string to indicate drop
+    return ""

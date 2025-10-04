@@ -113,6 +113,77 @@ def _build_variants(user: str, out: str, paraphraser, opts: Dict, stats: Dict):
         variants.append((u3, o3, applied))
     return variants
 
+def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats: Dict, translator=None):
+    """Build multiple paraphrased variants for SFT enrichment (2-3 answers per question, 2-3 questions per answer)"""
+    variants = []
+    
+    # Generate 2-3 different answers for the same question
+    answer_variants = []
+    for i in range(3):
+        if i == 0:
+            # Original answer
+            answer_variants.append((out, ["original_answer"]))
+        else:
+            # Paraphrased answers with different difficulties
+            difficulty = "easy" if i == 1 else "hard"
+            try:
+                paraphrased_out = paraphraser.paraphrase(out, difficulty=difficulty)
+                if paraphrased_out and not A.is_invalid_response(paraphrased_out):
+                    if opts.get("style_standardize", True):
+                        paraphrased_out = A.style_standardize_answer(paraphrased_out)
+                    paraphrased_out = A.ensure_terminal_punct(paraphrased_out)
+                    answer_variants.append((paraphrased_out, [f"paraphrase_answer_{difficulty}"]))
+                    stats["paraphrased_output"] += 1
+            except Exception as e:
+                logger.warning(f"Failed to paraphrase answer variant {i}: {e}")
+                continue
+    
+    # Generate 2-3 different questions for the same answer
+    question_variants = []
+    for i in range(3):
+        if i == 0:
+            # Original question
+            question_variants.append((user, ["original_question"]))
+        else:
+            # Paraphrased questions with different difficulties
+            difficulty = "easy" if i == 1 else "hard"
+            try:
+                paraphrased_user = paraphraser.paraphrase(user, difficulty=difficulty)
+                if paraphrased_user and not A.is_invalid_response(paraphrased_user):
+                    paraphrased_user = A.ensure_terminal_punct(paraphrased_user)
+                    question_variants.append((paraphrased_user, [f"paraphrase_question_{difficulty}"]))
+                    stats["paraphrased_input"] += 1
+            except Exception as e:
+                logger.warning(f"Failed to paraphrase question variant {i}: {e}")
+                continue
+    
+    # Create combinations: each question variant with each answer variant
+    for q_user, q_tags in question_variants:
+        for a_out, a_tags in answer_variants:
+            combined_tags = q_tags + a_tags
+            variants.append((q_user, a_out, combined_tags))
+    
+    # Add Vietnamese variants if translator is available
+    if translator and translator.is_loaded():
+        vi_variants = []
+        for q_user, a_out, tags in variants[:3]:  # Limit to first 3 to avoid too many variants
+            try:
+                # Translate question and answer
+                vi_q = translator.translate_text(q_user)
+                vi_a = translator.translate_text(a_out)
+                
+                if vi_q and vi_a and not A.is_invalid_response(vi_q) and not A.is_invalid_response(vi_a):
+                    vi_tags = tags + ["vietnamese_translated"]
+                    vi_variants.append((vi_q, vi_a, vi_tags))
+                    stats["vietnamese_variants"] = stats.get("vietnamese_variants", 0) + 1
+            except Exception as e:
+                logger.warning(f"Failed to create Vietnamese variant: {e}")
+                continue
+        
+        variants.extend(vi_variants)
+    
+    return variants
+
 def _apply_aug(instr: str, user: str, out: str, source: str, opts: Dict, paraphraser, stats: Dict):
     # Base cleanup & caps (returns cleaned strings)
     user = A.base_cleanup(user, opts.get("max_chars", 5000), opts.get("deidentify", True))
@@ -125,6 +196,13 @@ def _apply_aug(instr: str, user: str, out: str, source: str, opts: Dict, paraphr
 
     # Stack list of entries that has been applied augmentation and stylings
     applied = []
+
+    # Clean invalid responses with retry logic
+    if A.is_invalid_response(out):
+        out = A.retry_invalid_response(out, paraphraser, max_retries=3)
+        if not out:  # If retry failed, return empty to indicate drop
+            return instr, user, "", applied
+        applied.append("invalid_response_retried")
 
     # Style standardizing the answer
     if opts.get("style_standardize", True):
@@ -188,6 +266,11 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
         try:
             instr, user, out, applied = _apply_aug(instr, user, out, source, opts, paraphraser, stats)
 
+            # Skip if retry failed (empty output)
+            if not out:
+                stats["dropped_invalid"] = stats.get("dropped_invalid", 0) + 1
+                continue
+
             # 1) ALWAYS write the original (cleaned/style-standardised only)
             # Optional consistency spot-check (cheap)
             if not A.consistency_ok(user, out, opts.get("consistency_check_ratio", 0.0), paraphraser):
@@ -195,12 +278,15 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 # keep the sample but tag it
                 applied.append("consistency_flag")
 
-            # 2) If expansion is enabled, add augmented copies
+            # 2) If expansion is enabled, add enriched variants for SFT
             _commit_row(writer, source, rid, "medical_dialogue", instr, user, out, opts, stats, ["base"] + applied, dedupe_seen=dedupe_seen, translator=translator)
-            # Add augmented copies if expand
+            
+            # Add enriched variants if expand is enabled
             if opts.get("expand", True):
-                for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
-                    rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
+                # Use enriched variants for SFT (multiple Q&A combinations)
+                enriched_variants = _build_enriched_variants(user, out, paraphraser, opts, stats, translator)
+                for (u_aug, o_aug, aug_tags) in enriched_variants:
+                    rid_aug = f"{rid}-enriched{random.randint(1000,9999)}"
                     _commit_row(writer, source, rid_aug, "medical_dialogue", instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             
             # Increment count only on success
@@ -247,11 +333,19 @@ def _proc_pubmedqa_l(path, writer, paraphraser, opts, sample_limit, stats, cb, d
             rid   = str(k)
 
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_l", opts, paraphraser, stats)
+            
+            # Skip if retry failed (empty output)
+            if not out:
+                stats["dropped_invalid"] = stats.get("dropped_invalid", 0) + 1
+                continue
+                
             _commit_row(writer, "pubmedqa_l", rid, "biomedical_qa", instr, user, out, opts, stats, applied,
                         extra_meta={"year": v.get("YEAR"), "meshes": v.get("MESHES"), "labels": v.get("LABELS")}, dedupe_seen=dedupe_seen, translator=translator)
             if opts.get("expand", True):
-                for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
-                    rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
+                # Use enriched variants for SFT (multiple Q&A combinations)
+                enriched_variants = _build_enriched_variants(user, out, paraphraser, opts, stats, translator)
+                for (u_aug, o_aug, aug_tags) in enriched_variants:
+                    rid_aug = f"{rid}-enriched{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_l", rid_aug, "biomedical_qa",
                                 instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
 
@@ -302,10 +396,18 @@ def _proc_pubmedqa_u(path, writer, paraphraser, opts, sample_limit, stats, cb, d
                     out = guess.strip()
 
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_u", opts, paraphraser, stats)
+            
+            # Skip if retry failed (empty output)
+            if not out:
+                stats["dropped_invalid"] = stats.get("dropped_invalid", 0) + 1
+                continue
+                
             _commit_row(writer, "pubmedqa_u", str(k), "biomedical_qa_unlabeled", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen, translator=translator)
             if opts.get("expand", True):
-                for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
-                    rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
+                # Use enriched variants for SFT (multiple Q&A combinations)
+                enriched_variants = _build_enriched_variants(user, out, paraphraser, opts, stats, translator)
+                for (u_aug, o_aug, aug_tags) in enriched_variants:
+                    rid_aug = f"{rid}-enriched{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_u", rid_aug, "biomedical_qa",
                                 instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             
@@ -395,12 +497,20 @@ def _proc_pubmedqa_map(path, writer, paraphraser, opts, sample_limit, stats, cb,
 
             # Process the item
             instr, user, out, applied = _apply_aug(instr, user, out, "pubmedqa_map", opts, paraphraser, stats)
+            
+            # Skip if retry failed (empty output)
+            if not out:
+                stats["dropped_invalid"] = stats.get("dropped_invalid", 0) + 1
+                continue
+                
             _commit_row(writer, "pubmedqa_map", rid, "biomedical_qa", instr, user, out, opts, stats, applied, dedupe_seen=dedupe_seen, translator=translator)
             
             # Handle expansion if enabled
             if opts.get("expand", True):
-                for (u_aug, o_aug, aug_tags) in _build_variants(user, out, paraphraser, opts, stats):
-                    rid_aug = f"{rid}-aug{random.randint(1000,9999)}"
+                # Use enriched variants for SFT (multiple Q&A combinations)
+                enriched_variants = _build_enriched_variants(user, out, paraphraser, opts, stats, translator)
+                for (u_aug, o_aug, aug_tags) in enriched_variants:
+                    rid_aug = f"{rid}-enriched{random.randint(1000,9999)}"
                     _commit_row(writer, "pubmedqa_map", rid_aug, "biomedical_qa",
                                 instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
             

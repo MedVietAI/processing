@@ -408,7 +408,8 @@ def _run_job(dataset_key: str, params: ProcessParams):
                 sample_limit=params.sample_limit,
                 seed=params.seed,
                 progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"]),
-                translator=translator
+                translator=translator,
+                paraphraser=paraphraser
             )
         else:
             # Standard SFT processing mode

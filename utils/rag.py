@@ -7,7 +7,8 @@ from typing import Dict, List, Tuple, Optional, Callable
 
 from utils.schema import sft_row, rag_row
 from utils.llm import NvidiaClient, KeyRotator
-from vi.processing import should_translate
+from vi.processing import should_translate, translate_rag_row
+from utils import augment as A
 
 # Logger
 logger = logging.getLogger("rag_processor")
@@ -190,6 +191,15 @@ class RAGProcessor:
                 # Convert to QCA format
                 question, context, answer = self.convert_to_qca_format(instr, user, out)
                 
+                # Clean invalid responses with retry logic
+                if A.is_invalid_response(answer):
+                    if paraphraser:
+                        answer = A.retry_invalid_response(answer, paraphraser, max_retries=3)
+                    else:
+                        answer = A.clean_invalid_response(answer, "")
+                    if not answer:  # If retry failed, skip this sample
+                        continue
+                
                 if not question or not answer:
                     continue
                 
@@ -246,6 +256,15 @@ class RAGProcessor:
                 context = self.clean_conversational_content(context)
                 answer = self.clean_conversational_content(answer)
                 
+                # Clean invalid responses with retry logic
+                if A.is_invalid_response(answer):
+                    if paraphraser:
+                        answer = A.retry_invalid_response(answer, paraphraser, max_retries=3)
+                    else:
+                        answer = A.clean_invalid_response(answer, "")
+                    if not answer:  # If retry failed, skip this sample
+                        continue
+                
                 # Generate context if missing
                 if not context:
                     context = self.generate_context_from_qa(question, answer)
@@ -289,9 +308,8 @@ class RAGProcessor:
         # Apply Vietnamese translation if requested (translate Q/A/C fields directly)
         if should_translate(opts.get("vietnamese_translation", False) if opts else False, translator):
             try:
-                if translator:
-                    row = translator.translate_dict(row, ["question", "answer", "context"])
-                    row["vi_translated"] = True
+                row = translate_rag_row(row, translator, ["question", "answer", "context"])
+                row["vi_translated"] = True
             except Exception as e:
                 logger.error(f"Failed to translate RAG row: {e}")
 
@@ -307,7 +325,8 @@ def process_file_into_rag(
     sample_limit: Optional[int],
     seed: int,
     progress_cb: Optional[Callable[[float, str], None]],
-    translator=None
+    translator=None,
+    paraphraser=None
 ) -> Tuple[int, Dict]:
     """Main entry point for RAG processing"""
     random.seed(seed)

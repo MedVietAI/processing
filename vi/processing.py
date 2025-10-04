@@ -31,6 +31,34 @@ def _vi_sanitize_text(s: str) -> str:
         t = " ".join(filtered)
     return t
 
+def _validate_vi_translation(original: str, translated: str) -> bool:
+    """Validate Vietnamese translation quality"""
+    if not translated or not isinstance(translated, str):
+        return False
+    
+    # Check if translation is too short or too different in length
+    if len(translated.strip()) < 3:
+        return False
+    
+    # Check if translation contains too much English (should be mostly Vietnamese)
+    import re
+    english_chars = len(re.findall(r'[a-zA-Z]', translated))
+    total_chars = len(re.sub(r'\s', '', translated))
+    if total_chars > 0 and english_chars / total_chars > 0.7:
+        return False
+    
+    # Check for common translation failure patterns
+    failure_patterns = [
+        "translation", "error", "failed", "unable", "cannot",
+        "not available", "not found", "invalid", "error"
+    ]
+    translated_lower = translated.lower()
+    for pattern in failure_patterns:
+        if pattern in translated_lower:
+            return False
+    
+    return True
+
 def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = None) -> Dict[str, Any]:
     """
     Translate specific text fields in an SFT row from English to Vietnamese.
@@ -53,10 +81,16 @@ def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = 
     
     try:
         translated_row = translator.translate_dict(row, text_fields)
-        # Sanitize translated fields
+        # Validate and sanitize translated fields
         for f in text_fields:
             if f in translated_row.get("sft", {}):
-                translated_row["sft"][f] = _vi_sanitize_text(translated_row["sft"][f])
+                original = row.get("sft", {}).get(f, "")
+                translated = translated_row["sft"][f]
+                if _validate_vi_translation(original, translated):
+                    translated_row["sft"][f] = _vi_sanitize_text(translated)
+                else:
+                    logger.warning(f"Invalid Vietnamese translation for field {f}, keeping original")
+                    translated_row["sft"][f] = original
         logger.debug(f"Translated SFT row with fields: {text_fields}")
         return translated_row
     except Exception as e:
@@ -85,10 +119,16 @@ def translate_rag_row(row: Dict[str, Any], translator, text_fields: List[str] = 
     
     try:
         translated_row = translator.translate_dict(row, text_fields)
-        # Sanitize translated fields
+        # Validate and sanitize translated fields
         for f in text_fields:
             if f in translated_row:
-                translated_row[f] = _vi_sanitize_text(translated_row[f])
+                original = row.get(f, "")
+                translated = translated_row[f]
+                if _validate_vi_translation(original, translated):
+                    translated_row[f] = _vi_sanitize_text(translated)
+                else:
+                    logger.warning(f"Invalid Vietnamese translation for field {f}, keeping original")
+                    translated_row[f] = original
         logger.debug(f"Translated RAG row with fields: {text_fields}")
         return translated_row
     except Exception as e:
