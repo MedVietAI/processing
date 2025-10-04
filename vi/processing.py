@@ -31,6 +31,31 @@ def _vi_sanitize_text(s: str) -> str:
         t = " ".join(filtered)
     return t
 
+def _is_vietnamese_text(text: str) -> bool:
+    """Check if text is already in Vietnamese"""
+    if not text or not isinstance(text, str):
+        return False
+    
+    import re
+    # Check for Vietnamese characters
+    vietnamese_chars = len(re.findall(r'[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]', text, re.IGNORECASE))
+    total_chars = len(re.sub(r'\s', '', text))
+    
+    # If more than 20% of characters are Vietnamese, consider it Vietnamese text
+    if total_chars > 0 and vietnamese_chars / total_chars > 0.2:
+        return True
+    
+    # Check for common Vietnamese words (including single words)
+    vietnamese_words = ['chào', 'xin chào', 'cảm ơn', 'tôi', 'bạn', 'là', 'có', 'không', 'và', 'của', 'trong', 'với', 'để', 'cho', 'về', 'từ', 'đến', 'tại', 'này', 'đó', 'đây', 'kia', 'nào', 'sao', 'thế', 'nào', 'gì', 'ai', 'đâu', 'khi', 'nếu', 'mà', 'để', 'cho', 'về', 'từ', 'đến', 'tại', 'triệu', 'chứng', 'bệnh', 'tiểu', 'đường', 'bác', 'sĩ', 'bệnh', 'nhân']
+    text_lower = text.lower()
+    vietnamese_word_count = sum(1 for word in vietnamese_words if word in text_lower)
+    
+    # If text contains any Vietnamese words, consider it Vietnamese
+    if vietnamese_word_count >= 1:
+        return True
+    
+    return False
+
 def _validate_vi_translation(original: str, translated: str) -> bool:
     """Validate Vietnamese translation quality"""
     if not translated or not isinstance(translated, str):
@@ -40,8 +65,16 @@ def _validate_vi_translation(original: str, translated: str) -> bool:
     if len(translated.strip()) < 3:
         return False
     
-    # If translation is identical to original, it's not a valid translation
+    # If translation is identical to original, check if original was already Vietnamese
     if translated.strip() == original.strip():
+        # If original was already Vietnamese, this is actually a valid case
+        if _is_vietnamese_text(original):
+            return True
+        # Otherwise, it's not a valid translation
+        return False
+    
+    # Check if original was Vietnamese but translated is English (wrong direction)
+    if _is_vietnamese_text(original) and not _is_vietnamese_text(translated):
         return False
     
     # Check for common translation failure patterns
@@ -102,6 +135,16 @@ def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = 
             if field in sft_data and isinstance(sft_data[field], str) and sft_data[field].strip():
                 try:
                     original = sft_data[field]
+                    
+                    # Check if text is already in Vietnamese - skip translation if so
+                    if _is_vietnamese_text(original):
+                        logger.debug(f"Field '{field}' is already in Vietnamese, skipping translation")
+                        translated_sft[field] = original
+                        # Add success statistics (no translation needed)
+                        if hasattr(translator, '_stats'):
+                            add_translation_stats(translator._stats, f"sft_{field}", True)
+                        continue
+                    
                     translated = translator.translate_text(original)
                     
                     # Debug logging
@@ -170,6 +213,16 @@ def translate_rag_row(row: Dict[str, Any], translator, text_fields: List[str] = 
             if field in row and isinstance(row[field], str) and row[field].strip():
                 try:
                     original = row[field]
+                    
+                    # Check if text is already in Vietnamese - skip translation if so
+                    if _is_vietnamese_text(original):
+                        logger.debug(f"RAG Field '{field}' is already in Vietnamese, skipping translation")
+                        translated_row[field] = original
+                        # Add success statistics (no translation needed)
+                        if hasattr(translator, '_stats'):
+                            add_translation_stats(translator._stats, f"rag_{field}", True)
+                        continue
+                    
                     translated = translator.translate_text(original)
                     
                     # Debug logging

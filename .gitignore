@@ -2,3 +2,6 @@
 client1.json
 client2.json
 medai.json
+
+cache
+__pycache__
