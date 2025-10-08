@@ -145,6 +145,7 @@ def translate_sft_row(row: Dict[str, Any], translator, text_fields: List[str] = 
                             add_translation_stats(translator._stats, f"sft_{field}", True)
                         continue
                     
+                    # Use LLM for Vietnamese translation instead of Opus model
                     translated = translator.translate_text(original)
                     
                     # Debug logging

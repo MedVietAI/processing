@@ -109,6 +109,7 @@ class NvidiaClient:
             data = r.json()
             text = data["choices"][0]["message"]["content"]
             clean = self._clean_resp(text)
+            # Log the output here
             logger.info(f"[LLM][NVIDIA] out={snip(clean)}")
             return clean        
         except Exception as e:
@@ -117,11 +118,13 @@ class NvidiaClient:
             return None
 
 class Paraphraser:
-    """Prefers NVIDIA (cheap), falls back to Gemini. Also offers translate/backtranslate and a tiny consistency judge."""
+    """Prefers NVIDIA (cheap), falls back to Gemini EASY only. Also offers translate/backtranslate and a tiny consistency judge."""
     def __init__(self, nvidia_model: str, gemini_model_easy: str, gemini_model_hard: str):
         self.nv = NvidiaClient(KeyRotator("NVIDIA_API"), nvidia_model)
         self.gm_easy = GeminiClient(KeyRotator("GEMINI_API"), gemini_model_easy)
-        self.gm_hard = GeminiClient(KeyRotator("GEMINI_API"), gemini_model_hard)
+        # Only use GEMINI_MODEL_EASY, ignore hard model completely
+        self.gm_hard = None  # Disabled - only use easy model
+        logger.info("Paraphraser initialized: NVIDIA -> GEMINI_EASY (GEMINI_HARD disabled)")
 
     # Regex-based cleaning resp from quotes
     def _clean_resp(self, resp: str) -> str:
@@ -147,11 +150,17 @@ class Paraphraser:
             "Do not fabricate or remove factual claims.\n" 
             "Return ONLY the rewritten text, without any introduction, commentary.\n"+ text
         )
+        # Always try NVIDIA first
         out = self.nv.generate(prompt, temperature=0.1, max_tokens=min(600, max(128, len(text)//2)))
-        if out: return self._clean_resp(out)
-        gm = self.gm_easy if difficulty == "easy" else self.gm_hard
-        out = gm.generate(prompt, max_output_tokens=min(600, max(128, len(text)//2)))
-        return self._clean_resp(out) if out else text
+        if out: 
+            return self._clean_resp(out)
+        
+        # Only fallback to GEMINI_MODEL_EASY (ignore difficulty parameter)
+        out = self.gm_easy.generate(prompt, max_output_tokens=min(600, max(128, len(text)//2)))
+        if out:
+            logger.info(f"[LLM][GEMINI] out={snip(self._clean_resp(out))}")
+            return self._clean_resp(out)
+        return text
 
     # ————— Translate & Backtranslate —————
     def translate(self, text: str, target_lang: str = "vi") -> Optional[str]:

@@ -12,19 +12,20 @@ logger = logging.getLogger(__name__)
 
 class VietnameseTranslator:
     """
-    Vietnamese translator using Helsinki-NLP/opus-mt-en-vi model.
+    Vietnamese translator using LLM models (NVIDIA/Gemini) with Opus as fallback.
     
-    This class handles translation from English to Vietnamese using the
-    MarianMT model from Hugging Face Transformers.
+    This class handles translation from English to Vietnamese using LLM models
+    for better quality, with Opus model as fallback.
     """
     
-    def __init__(self, model_name: Optional[str] = None, device: Optional[str] = None):
+    def __init__(self, model_name: Optional[str] = None, device: Optional[str] = None, paraphraser=None):
         """
         Initialize the Vietnamese translator.
         
         Args:
-            model_name: Hugging Face model name. Defaults to EN_VI env var or Helsinki-NLP/opus-mt-en-vi
-            device: Device to run the model on ('cpu', 'cuda', 'auto'). Defaults to 'auto'
+            model_name: Hugging Face model name for fallback. Defaults to EN_VI env var or Helsinki-NLP/opus-mt-en-vi
+            device: Device to run the fallback model on ('cpu', 'cuda', 'auto'). Defaults to 'auto'
+            paraphraser: Paraphraser instance with LLM models for primary translation
         """
         self.model_name = model_name or os.getenv("EN_VI", "Helsinki-NLP/opus-mt-en-vi")
         self.device = self._get_device(device)
@@ -32,8 +33,9 @@ class VietnameseTranslator:
         self.tokenizer = None
         self._is_loaded = False
         self._stats = {"total_translations": 0, "successful_translations": 0, "failed_translations": 0}
+        self.paraphraser = paraphraser  # LLM-based translator
         
-        logger.info(f"VietnameseTranslator initialized with model: {self.model_name}")
+        logger.info(f"VietnameseTranslator initialized with LLM models + Opus fallback: {self.model_name}")
         logger.info(f"Using device: {self.device}")
     
     def _get_device(self, device: Optional[str]) -> str:
@@ -87,7 +89,7 @@ class VietnameseTranslator:
     
     def translate_text(self, text: str) -> str:
         """
-        Translate a single text from English to Vietnamese.
+        Translate a single text from English to Vietnamese using LLM models first, Opus as fallback.
         
         Args:
             text: English text to translate
@@ -95,17 +97,30 @@ class VietnameseTranslator:
         Returns:
             Translated Vietnamese text
         """
-        if not self._is_loaded:
-            self.load_model()
-        
         if not text or not text.strip():
             return text
         
         try:
             self._stats["total_translations"] += 1
             
+            # Try LLM-based translation first (NVIDIA/Gemini)
+            if self.paraphraser:
+                try:
+                    translated = self.paraphraser.translate(text, target_lang="vi")
+                    if translated and translated.strip() and translated.strip() != text.strip():
+                        logger.debug(f"LLM Translation result: '{text[:50]}...' -> '{translated[:50]}...'")
+                        self._stats["successful_translations"] += 1
+                        return translated.strip()
+                    else:
+                        logger.debug("LLM translation failed or returned identical text, trying Opus fallback")
+                except Exception as e:
+                    logger.debug(f"LLM translation failed: {e}, trying Opus fallback")
+            
+            # Fallback to Opus model
+            if not self._is_loaded:
+                self.load_model()
+            
             # Prepare input with target language token
-            # The model requires a target language token in the format >>id<<
             input_text = f">>vie<< {text.strip()}"
             
             # Tokenize
@@ -130,7 +145,7 @@ class VietnameseTranslator:
             # Decode
             translated = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
             
-            logger.debug(f"Translation result: '{text[:50]}...' -> '{translated[:50]}...'")
+            logger.debug(f"Opus Translation result: '{text[:50]}...' -> '{translated[:50]}...'")
             logger.debug(f"Are original and translated the same? {text.strip() == translated.strip()}")
             
             # Track success

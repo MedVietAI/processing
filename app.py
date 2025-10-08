@@ -394,10 +394,12 @@ def _run_job(dataset_key: str, params: ProcessParams):
                 cache_dir = os.path.abspath("cache/huggingface")
                 os.makedirs(cache_dir, exist_ok=True)
                 os.environ["HF_HOME"] = cache_dir
-                
+
+                # Pass paraphraser to translator for LLM-based translation
+                vietnamese_translator.paraphraser = paraphraser
                 vietnamese_translator.load_model()
                 translator = vietnamese_translator
-                logger.info("✅ Vietnamese translator loaded successfully")
+                logger.info("✅ Vietnamese translator loaded successfully with LLM models")
             except Exception as e:
                 logger.error(f"❌ Failed to load Vietnamese translator: {e}")
                 logger.warning("Continuing without Vietnamese translation...")
