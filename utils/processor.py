@@ -141,6 +141,8 @@ def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats
                 enhanced_out = paraphraser.paraphrase(out, difficulty="hard", custom_prompt=style_prompt)
                 
                 if enhanced_out and not A.is_invalid_response(enhanced_out):
+                    # Clean conversational elements
+                    enhanced_out = A.clean_conversational_elements(enhanced_out)
                     if opts.get("style_standardize", True):
                         enhanced_out = A.style_standardize_answer(enhanced_out)
                     enhanced_out = A.ensure_terminal_punct(enhanced_out)
@@ -170,6 +172,8 @@ def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats
                 enhanced_user = paraphraser.paraphrase(user, difficulty="hard", custom_prompt=style_prompt)
                 
                 if enhanced_user and not A.is_invalid_response(enhanced_user):
+                    # Clean conversational elements
+                    enhanced_user = A.clean_conversational_elements(enhanced_user)
                     enhanced_user = A.ensure_terminal_punct(enhanced_user)
                     question_variants.append((enhanced_user, tags))
                     stats["paraphrased_input"] += 1
@@ -237,6 +241,10 @@ def _apply_aug(instr: str, user: str, out: str, source: str, opts: Dict, paraphr
     # Stack list of entries that has been applied augmentation and stylings
     applied = []
 
+    # Clean conversational elements first
+    out = A.clean_conversational_elements(out)
+    user = A.clean_conversational_elements(user)
+    
     # Clean invalid responses with retry logic
     if A.is_invalid_response(out):
         out = A.retry_invalid_response(out, paraphraser, max_retries=3)
@@ -306,9 +314,10 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
         try:
             instr, user, out, applied = _apply_aug(instr, user, out, source, opts, paraphraser, stats)
 
-            # Skip if retry failed (empty output)
+            # Skip if retry failed (empty output) - DO NOT RECORD FAILED RESPONSES
             if not out:
                 stats["dropped_invalid"] = stats.get("dropped_invalid", 0) + 1
+                logger.warning(f"[PROC] {source} dropped invalid response for item {i} - will retry in next batch")
                 continue
 
             # 1) ALWAYS write the original (cleaned/style-standardised only)

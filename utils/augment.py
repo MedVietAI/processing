@@ -142,6 +142,64 @@ def is_invalid_response(text: str) -> bool:
     
     return False
 
+def clean_conversational_elements(text: str) -> str:
+    """Remove conversational elements and non-medical information smartly"""
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Remove common conversational prefixes
+    conversational_prefixes = [
+        r"^(hi|hello|hey|greetings?)\s*,?\s*",
+        r"^(xin chào|chào|chào bạn)\s*,?\s*",
+        r"^(if you are a doctor|if you're a doctor|as a doctor)\s*,?\s*",
+        r"^(nếu bạn là bác sĩ|nếu bạn là doctor)\s*,?\s*",
+        r"^(please|vui lòng)\s*,?\s*",
+        r"^(thank you|cảm ơn)\s*,?\s*",
+        r"^(thanks|cảm ơn)\s*,?\s*",
+        r"^(regards|best regards|cheers)\s*,?\s*",
+        r"^(i hope this helps|hy vọng điều này giúp ích)\s*,?\s*",
+        r"^(i'm sorry|tôi xin lỗi)\s*,?\s*",
+        r"^(let me help|để tôi giúp)\s*,?\s*",
+        r"^(i understand|tôi hiểu)\s*,?\s*",
+        r"^(i can help|tôi có thể giúp)\s*,?\s*",
+        r"^(i'll be happy to|tôi sẽ vui lòng)\s*,?\s*",
+        r"^(i would be glad to|tôi sẽ rất vui)\s*,?\s*",
+        r"^(i'm here to help|tôi ở đây để giúp)\s*,?\s*",
+        r"^(i'm a doctor|tôi là bác sĩ)\s*,?\s*",
+        r"^(as a medical professional|như một chuyên gia y tế)\s*,?\s*",
+        r"^(from a medical perspective|từ góc độ y tế)\s*,?\s*",
+        r"^(medically speaking|nói về mặt y tế)\s*,?\s*",
+    ]
+    
+    cleaned_text = text
+    for pattern in conversational_prefixes:
+        import re
+        cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.IGNORECASE)
+    
+    # Remove common conversational suffixes
+    conversational_suffixes = [
+        r"\s*,?\s*(hope this helps|hy vọng điều này giúp ích).*$",
+        r"\s*,?\s*(let me know if you need more|hãy cho tôi biết nếu bạn cần thêm).*$",
+        r"\s*,?\s*(feel free to ask|đừng ngại hỏi).*$",
+        r"\s*,?\s*(if you have any questions|nếu bạn có câu hỏi).*$",
+        r"\s*,?\s*(please let me know|vui lòng cho tôi biết).*$",
+        r"\s*,?\s*(i'm here to help|tôi ở đây để giúp).*$",
+        r"\s*,?\s*(best regards|trân trọng).*$",
+        r"\s*,?\s*(take care|chúc sức khỏe).*$",
+        r"\s*,?\s*(good luck|chúc may mắn).*$",
+        r"\s*,?\s*(wishing you well|chúc bạn khỏe mạnh).*$",
+    ]
+    
+    for pattern in conversational_suffixes:
+        import re
+        cleaned_text = re.sub(pattern, "", cleaned_text, flags=re.IGNORECASE)
+    
+    # Clean up extra whitespace and punctuation
+    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+    cleaned_text = re.sub(r'^[,\s]+|[,\s]+$', '', cleaned_text)
+    
+    return cleaned_text if cleaned_text else text
+
 def clean_invalid_response(text: str, fallback: str = "") -> str:
     """Clean invalid responses by returning fallback or empty string"""
     if is_invalid_response(text):
@@ -153,14 +211,34 @@ def retry_invalid_response(text: str, paraphraser, max_retries: int = 3) -> str:
     if not is_invalid_response(text):
         return text
     
+    # Clean conversational elements first
+    cleaned_text = clean_conversational_elements(text)
+    if cleaned_text != text and not is_invalid_response(cleaned_text):
+        return cleaned_text
+    
     for attempt in range(max_retries):
         try:
-            # Try paraphrasing with different difficulty levels
-            difficulty = "easy" if attempt == 0 else "hard" if attempt == 1 else "easy"
-            retry_text = paraphraser.paraphrase(text, difficulty=difficulty)
+            # Try different strategies based on attempt
+            if attempt == 0:
+                # First try: Simple paraphrasing
+                retry_text = paraphraser.paraphrase(text, difficulty="easy")
+            elif attempt == 1:
+                # Second try: More aggressive paraphrasing with medical focus
+                medical_prompt = f"Rewrite this medical response to be more professional and accurate:\n\n{text}"
+                retry_text = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=medical_prompt)
+            else:
+                # Third try: Direct medical content generation
+                medical_prompt = f"Provide a professional medical response to this question:\n\n{text}"
+                retry_text = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=medical_prompt)
             
             if retry_text and not is_invalid_response(retry_text):
-                return retry_text
+                # Clean conversational elements from retry
+                cleaned_retry = clean_conversational_elements(retry_text)
+                if cleaned_retry and not is_invalid_response(cleaned_retry):
+                    return cleaned_retry
+                elif retry_text:  # Use original retry if cleaning fails
+                    return retry_text
+                    
         except Exception as e:
             logger.warning(f"Retry attempt {attempt + 1} failed: {e}")
             continue
