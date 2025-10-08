@@ -52,7 +52,11 @@ def process_file_into_sft(
         "backtranslated_input": 0,
         "backtranslated_output": 0,
         "dedup_skipped": 0,
-        "consistency_failed": 0
+        "consistency_failed": 0,
+        "medical_accuracy_failed": 0,
+        "clinical_scenarios_created": 0,
+        "enhanced_terminology": 0,
+        "vietnamese_variants": 0
     }
     # Start processing SFT
     key_summary = {k: augment_opts.get(k) for k in (
@@ -114,47 +118,63 @@ def _build_variants(user: str, out: str, paraphraser, opts: Dict, stats: Dict):
     return variants
 
 def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats: Dict, translator=None):
-    """Build multiple paraphrased variants for SFT enrichment (2-3 answers per question, 2-3 questions per answer)"""
+    """Build multiple paraphrased variants for SFT enrichment with enhanced diversity strategies"""
     variants = []
     
-    # Generate 2-3 different answers for the same question
+    # Enhanced answer generation with different perspectives
     answer_variants = []
-    for i in range(3):
-        if i == 0:
-            # Original answer
-            answer_variants.append((out, ["original_answer"]))
+    answer_strategies = [
+        ("original", out, ["original_answer"]),
+        ("concise", None, ["concise_answer"]),
+        ("detailed", None, ["detailed_answer"]),
+        ("clinical", None, ["clinical_answer"]),
+        ("patient_friendly", None, ["patient_friendly_answer"])
+    ]
+    
+    for strategy, original_text, tags in answer_strategies:
+        if strategy == "original":
+            answer_variants.append((original_text, tags))
         else:
-            # Paraphrased answers with different difficulties
-            difficulty = "easy" if i == 1 else "hard"
             try:
-                paraphrased_out = paraphraser.paraphrase(out, difficulty=difficulty)
-                if paraphrased_out and not A.is_invalid_response(paraphrased_out):
+                # Generate different answer styles
+                style_prompt = _get_answer_style_prompt(strategy, user, out)
+                enhanced_out = paraphraser.paraphrase(out, difficulty="hard", custom_prompt=style_prompt)
+                
+                if enhanced_out and not A.is_invalid_response(enhanced_out):
                     if opts.get("style_standardize", True):
-                        paraphrased_out = A.style_standardize_answer(paraphrased_out)
-                    paraphrased_out = A.ensure_terminal_punct(paraphrased_out)
-                    answer_variants.append((paraphrased_out, [f"paraphrase_answer_{difficulty}"]))
+                        enhanced_out = A.style_standardize_answer(enhanced_out)
+                    enhanced_out = A.ensure_terminal_punct(enhanced_out)
+                    answer_variants.append((enhanced_out, tags))
                     stats["paraphrased_output"] += 1
             except Exception as e:
-                logger.warning(f"Failed to paraphrase answer variant {i}: {e}")
+                logger.warning(f"Failed to generate {strategy} answer variant: {e}")
                 continue
     
-    # Generate 2-3 different questions for the same answer
+    # Enhanced question generation with different question types
     question_variants = []
-    for i in range(3):
-        if i == 0:
-            # Original question
-            question_variants.append((user, ["original_question"]))
+    question_strategies = [
+        ("original", user, ["original_question"]),
+        ("clarifying", None, ["clarifying_question"]),
+        ("follow_up", None, ["follow_up_question"]),
+        ("symptom_focused", None, ["symptom_focused_question"]),
+        ("treatment_focused", None, ["treatment_focused_question"])
+    ]
+    
+    for strategy, original_text, tags in question_strategies:
+        if strategy == "original":
+            question_variants.append((original_text, tags))
         else:
-            # Paraphrased questions with different difficulties
-            difficulty = "easy" if i == 1 else "hard"
             try:
-                paraphrased_user = paraphraser.paraphrase(user, difficulty=difficulty)
-                if paraphrased_user and not A.is_invalid_response(paraphrased_user):
-                    paraphrased_user = A.ensure_terminal_punct(paraphrased_user)
-                    question_variants.append((paraphrased_user, [f"paraphrase_question_{difficulty}"]))
+                # Generate different question styles
+                style_prompt = _get_question_style_prompt(strategy, user, out)
+                enhanced_user = paraphraser.paraphrase(user, difficulty="hard", custom_prompt=style_prompt)
+                
+                if enhanced_user and not A.is_invalid_response(enhanced_user):
+                    enhanced_user = A.ensure_terminal_punct(enhanced_user)
+                    question_variants.append((enhanced_user, tags))
                     stats["paraphrased_input"] += 1
             except Exception as e:
-                logger.warning(f"Failed to paraphrase question variant {i}: {e}")
+                logger.warning(f"Failed to generate {strategy} question variant: {e}")
                 continue
     
     # Create combinations: each question variant with each answer variant
@@ -166,7 +186,7 @@ def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats
     # Add Vietnamese variants if translator is available
     if translator and translator.is_loaded():
         vi_variants = []
-        for q_user, a_out, tags in variants[:3]:  # Limit to first 3 to avoid too many variants
+        for q_user, a_out, tags in variants[:5]:  # Limit to first 5 to avoid too many variants
             try:
                 # Translate question and answer
                 vi_q = translator.translate_text(q_user)
@@ -183,6 +203,26 @@ def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats
         variants.extend(vi_variants)
     
     return variants
+
+def _get_answer_style_prompt(strategy: str, question: str, original_answer: str) -> str:
+    """Generate style-specific prompts for answer enhancement"""
+    prompts = {
+        "concise": f"Rewrite this medical answer to be more concise while preserving all key medical information:\n\n{original_answer}",
+        "detailed": f"Expand this medical answer with more detailed explanations while maintaining accuracy:\n\n{original_answer}",
+        "clinical": f"Rewrite this answer using more formal clinical language and medical terminology:\n\n{original_answer}",
+        "patient_friendly": f"Rewrite this medical answer in simpler, more patient-friendly language while keeping it medically accurate:\n\n{original_answer}"
+    }
+    return prompts.get(strategy, f"Paraphrase this medical answer: {original_answer}")
+
+def _get_question_style_prompt(strategy: str, original_question: str, answer: str) -> str:
+    """Generate style-specific prompts for question enhancement"""
+    prompts = {
+        "clarifying": f"Rewrite this medical question to ask for clarification or more specific information:\n\n{original_question}",
+        "follow_up": f"Create a follow-up question that a patient might ask after this medical question:\n\n{original_question}",
+        "symptom_focused": f"Rewrite this question to focus more on symptoms and their characteristics:\n\n{original_question}",
+        "treatment_focused": f"Rewrite this question to focus more on treatment options and management:\n\n{original_question}"
+    }
+    return prompts.get(strategy, f"Paraphrase this medical question: {original_question}")
 
 def _apply_aug(instr: str, user: str, out: str, source: str, opts: Dict, paraphraser, stats: Dict):
     # Base cleanup & caps (returns cleaned strings)
@@ -272,6 +312,11 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 continue
 
             # 1) ALWAYS write the original (cleaned/style-standardised only)
+            # Enhanced medical accuracy validation
+            if not A.validate_medical_accuracy(user, out, paraphraser):
+                stats["medical_accuracy_failed"] = stats.get("medical_accuracy_failed", 0) + 1
+                applied.append("medical_accuracy_flag")
+            
             # Optional consistency spot-check (cheap)
             if not A.consistency_ok(user, out, opts.get("consistency_check_ratio", 0.0), paraphraser):
                 stats["consistency_failed"] += 1
@@ -288,6 +333,14 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 for (u_aug, o_aug, aug_tags) in enriched_variants:
                     rid_aug = f"{rid}-enriched{random.randint(1000,9999)}"
                     _commit_row(writer, source, rid_aug, "medical_dialogue", instr, u_aug, o_aug, opts, stats, aug_tags, dedupe_seen=dedupe_seen, translator=translator)
+                
+                # Add clinical scenarios for enhanced diversity
+                if opts.get("clinical_scenarios", True):
+                    clinical_scenarios = A.create_clinical_scenarios(user, out, paraphraser)
+                    for (scenario_q, scenario_a, scenario_tag) in clinical_scenarios:
+                        rid_scenario = f"{rid}-scenario{random.randint(1000,9999)}"
+                        _commit_row(writer, source, rid_scenario, "medical_dialogue", instr, scenario_q, scenario_a, opts, stats, [scenario_tag], dedupe_seen=dedupe_seen, translator=translator)
+                        stats["clinical_scenarios_created"] += 1
             
             # Increment count only on success
             count += 1

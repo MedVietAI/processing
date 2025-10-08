@@ -142,14 +142,20 @@ class Paraphraser:
         return txt.strip()
 
     # ————— Paraphrase —————
-    def paraphrase(self, text: str, difficulty: str = "easy") -> str:
+    def paraphrase(self, text: str, difficulty: str = "easy", custom_prompt: str = None) -> str:
         if not text or len(text) < 12:
             return text
-        prompt = (
-            "Paraphrase the following medical text concisely, preserve meaning and clinical terms.\n"
-            "Do not fabricate or remove factual claims.\n" 
-            "Return ONLY the rewritten text, without any introduction, commentary.\n"+ text
-        )
+        
+        # Use custom prompt if provided, otherwise use default
+        if custom_prompt:
+            prompt = custom_prompt
+        else:
+            prompt = (
+                "Paraphrase the following medical text concisely, preserve meaning and clinical terms.\n"
+                "Do not fabricate or remove factual claims.\n" 
+                "Return ONLY the rewritten text, without any introduction, commentary.\n"+ text
+            )
+        
         # Always try NVIDIA first
         out = self.nv.generate(prompt, temperature=0.1, max_tokens=min(600, max(128, len(text)//2)))
         if out: 
