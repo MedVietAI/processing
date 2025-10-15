@@ -15,7 +15,8 @@ from utils.datasets import resolve_dataset, hf_download_dataset
 from utils.processor import process_file_into_sft
 from utils.rag import process_file_into_rag
 from utils.drive_saver import DriveSaver
-from utils.llm import Paraphraser
+from utils.cloud_llm import Paraphraser
+from utils.local_llm import LocalParaphraser
 from utils.schema import CentralisedWriter, RAGWriter
 from utils.token import get_credentials, exchange_code, build_auth_url
 from vi.translator import VietnameseTranslator
@@ -30,29 +31,54 @@ if not logger.handlers:
 # ────────── Boot ──────────
 load_dotenv(override=True)
 
+# Check if running in local mode
+IS_LOCAL = os.getenv("IS_LOCAL", "false").lower() == "true"
+
 SPACE_NAME = os.getenv("SPACE_NAME", "MedAI Processor")
 OUTPUT_DIR = os.path.abspath(os.getenv("OUTPUT_DIR", "cache/outputs"))
 LOG_DIR = os.path.abspath(os.getenv("LOG_DIR", "logs"))
+
+# In local mode, use data/ folder instead of cache/outputs
+if IS_LOCAL:
+    OUTPUT_DIR = os.path.abspath("data")
+    logger.info(f"[MODE] Running in LOCAL mode - outputs will be saved to: {OUTPUT_DIR}")
+else:
+    logger.info(f"[MODE] Running in CLOUD mode - outputs will be saved to: {OUTPUT_DIR}")
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
 
-# --- Bootstrap Google OAuth ---
-try:
-    creds = get_credentials()
-    if creds:
-        logger.info("✅ OAuth credentials loaded and valid")
-except Exception as e:
-    logger.warning(f"⚠️ OAuth not initialized yet: {e}")
+# --- Bootstrap Google OAuth (only in cloud mode) ---
+if not IS_LOCAL:
+    try:
+        creds = get_credentials()
+        if creds:
+            logger.info("✅ OAuth credentials loaded and valid")
+    except Exception as e:
+        logger.warning(f"⚠️ OAuth not initialized yet: {e}")
 
-# --- Bootstrap Google Drive ---
-drive = DriveSaver(default_folder_id=os.getenv("GDRIVE_FOLDER_ID"))
+    # --- Bootstrap Google Drive (only in cloud mode) ---
+    drive = DriveSaver(default_folder_id=os.getenv("GDRIVE_FOLDER_ID"))
+else:
+    drive = None
+    logger.info("🚀 Local mode: Skipping Google Drive setup")
 
-# LLM rotator with paraphraser nodes
-paraphraser = Paraphraser(
-    nvidia_model=os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct"),
-    gemini_model_easy=os.getenv("GEMINI_MODEL_EASY", "gemini-2.5-flash-lite"),
-    gemini_model_hard=os.getenv("GEMINI_MODEL_HARD", "gemini-2.5-flash"),
-)
+# Initialize paraphraser based on mode
+if IS_LOCAL:
+    # Local mode: Use MedAlpaca model
+    logger.info("🏠 Initializing local MedAlpaca paraphraser...")
+    paraphraser = LocalParaphraser(
+        model_name="medalpaca/medalpaca-13b",
+        hf_token=os.getenv("HF_TOKEN")
+    )
+else:
+    # Cloud mode: Use existing NVIDIA/Gemini setup
+    logger.info("☁️ Initializing cloud paraphraser (NVIDIA/Gemini)...")
+    paraphraser = Paraphraser(
+        nvidia_model=os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct"),
+        gemini_model_easy=os.getenv("GEMINI_MODEL_EASY", "gemini-2.5-flash-lite"),
+        gemini_model_hard=os.getenv("GEMINI_MODEL_HARD", "gemini-2.5-flash"),
+    )
 
 # Vietnamese translator (currently using Helsinki-NLP/opus-mt-en-vi)
 vietnamese_translator = VietnameseTranslator()
@@ -123,6 +149,11 @@ def root():
       <h1>📊 {SPACE_NAME} – Medical Dataset Augmenter</h1>
       <p>This Hugging Face Space processes medical datasets into a <b>centralised fine-tuning format</b>
          (JSONL + CSV), with optional <i>data augmentation</i>.</p>
+      
+      <div style="margin-bottom: 15px; padding: 10px; background: {'#e8f5e8' if IS_LOCAL else '#e8f0ff'}; border-radius: 5px; border-left: 4px solid {'#28a745' if IS_LOCAL else '#007bff'};">
+        <strong>🔧 Current Mode:</strong> {'🏠 LOCAL (MedAlpaca-13b)' if IS_LOCAL else '☁️ CLOUD (NVIDIA/Gemini APIs)'}
+        <br><small>Outputs will be saved to: {OUTPUT_DIR}</small>
+      </div>
 
       <div class="section">
         <h2>⚡ Quick Actions</h2>
@@ -155,7 +186,7 @@ def root():
         <ul>
           <li><a href="/status" target="_blank">Check current job status</a></li>
           <li><a href="/files" target="_blank">List generated artifacts</a></li>
-          <li><a href="https://medvietai-processing.hf.space/oauth2/start" target="_blank">Authorize your GCS credential</a></li>
+          {'<li><a href="https://medvietai-processing.hf.space/oauth2/start" target="_blank">Authorize your GCS credential</a></li>' if not IS_LOCAL else ''}
           <li><a href="https://huggingface.co/spaces/BinKhoaLe1812/MedAI_Processing/blob/main/REQUEST.md" target="_blank">📑 Request Doc (all curl examples)</a></li>
         </ul>
       </div>
@@ -242,9 +273,12 @@ def status():
     with STATE_LOCK:
         return JSONResponse(STATE)
     
-# ──────── GCS token ────────
+# ──────── GCS token (only in cloud mode) ────────
 @app.get("/oauth2/start")
 def oauth2_start(request: Request):
+    if IS_LOCAL:
+        raise HTTPException(400, "OAuth is not available in local mode. Google Drive integration is disabled.")
+    
     # Compute redirect URI dynamically from the actual host the Space is using
     host = request.headers.get("x-forwarded-host") or request.headers.get("host")
     scheme = "https"  # Spaces are HTTPS at the edge
@@ -256,9 +290,12 @@ def oauth2_start(request: Request):
     except Exception as e:
         raise HTTPException(500, f"OAuth init failed: {e}")
 
-# Display your token
+# Display your token (only in cloud mode)
 @app.get("/oauth2/callback")
 def oauth2_callback(request: Request, code: str = "", state: str = ""):
+    if IS_LOCAL:
+        raise HTTPException(400, "OAuth is not available in local mode. Google Drive integration is disabled.")
+    
     if not code:
         raise HTTPException(400, "Missing 'code'")
     # Send req
@@ -448,14 +485,19 @@ def _run_job(dataset_key: str, params: ProcessParams):
         logger.info(f"[JOB] Processed dataset={dataset_key} rows={count} stats={stats}")
         writer.close()
 
-        # Upload to GDrive
-        set_state(message="uploading to Google Drive", progress=0.95)
-        up1 = drive.upload_file_to_drive(jsonl_path, mimetype="application/json")
-        up2 = drive.upload_file_to_drive(csv_path,   mimetype="text/csv")
-        logger.info(
-            f"[JOB] Uploads complete uploaded={bool(up1 and up2)} "
-            f"jsonl={jsonl_path} csv={csv_path}"
-        )
+        # Upload to GDrive (only in cloud mode) or save locally
+        if IS_LOCAL:
+            set_state(message="saving files locally", progress=0.95)
+            logger.info(f"[JOB] Files saved locally: jsonl={jsonl_path} csv={csv_path}")
+            up1 = up2 = True  # Local mode always "succeeds"
+        else:
+            set_state(message="uploading to Google Drive", progress=0.95)
+            up1 = drive.upload_file_to_drive(jsonl_path, mimetype="application/json")
+            up2 = drive.upload_file_to_drive(csv_path,   mimetype="text/csv")
+            logger.info(
+                f"[JOB] Uploads complete uploaded={bool(up1 and up2)} "
+                f"jsonl={jsonl_path} csv={csv_path}"
+            )
         
         # Finalize a task
         result = {

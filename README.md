@@ -25,6 +25,12 @@ short_description: Data processing with en-vi translation. Derived from 500k mi
 
 ## 🎯 Features
 
+### 🏠 Dual Mode Operation
+- **Local Mode**: MedAlpaca-13b model running locally for privacy and cost efficiency
+- **Cloud Mode**: NVIDIA + Gemini API integration for scalable processing
+- **Dynamic Switching**: Toggle between modes via environment variables
+- **Medical Specialization**: MedAlpaca-13b specifically fine-tuned for medical tasks
+
 ### 🔄 Advanced Data Augmentation
 - **Paraphrasing**: Multi-model rotation (NVIDIA + Gemini) with easy/hard difficulty levels
 - **Backtranslation**: Vietnamese pivot language for semantic preservation
@@ -72,6 +78,18 @@ short_description: Data processing with en-vi translation. Derived from 500k mi
 - **PubMedQA-MAP**: Mapped biomedical Q&A pairs
 
 ## ⚙️ Configuration
+
+### Mode Selection
+```bash
+# Local Mode (MedAlpaca-13b)
+IS_LOCAL=true
+HF_TOKEN=your_huggingface_token
+
+# Cloud Mode (NVIDIA/Gemini APIs)
+IS_LOCAL=false
+NVIDIA_API_1=your_nvidia_key
+GEMINI_API_1=your_gemini_key
+```
 
 ### Augmentation Parameters
 ```python
@@ -140,10 +158,11 @@ curl -X POST "https://huggingface.co/spaces/MedVietAI/processing/rag/healthcarem
 
 ## 📚 Documentation
 
-- [Request Documentation](https://huggingface.co/spaces/MedVietAI/processing/blob/main/REQUEST.md)
-- [Data Processing Guide](https://huggingface.co/spaces/MedVietAI/processing/blob/main/DATA_PROCESSING.md)
+- [Request Documentation](docs/REQUEST.md)  
+- [Data Processing Guide](docs/DATA_PROCESSING.md)  
+- [Local Mode Guide](docs/LOCAL_MODE.md)  
 
 ## 📄 License
 
-[Apache-2.0 LICENSE](https://huggingface.co/spaces/MedVietAI/processing/blob/main/LICENSE.txt)
+[Apache-2.0 LICENSE](docs/LICENSE.txt)
 

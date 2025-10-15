@@ -9,9 +9,18 @@ RUN useradd -m -u 1000 user
 ENV HOME=/home/user
 WORKDIR $HOME/app
 
+# Set dynamic mode environment variable (default to cloud mode)
+ARG IS_LOCAL=true
+ENV IS_LOCAL=${IS_LOCAL}
+
 # Install Python dependencies first (better layer caching)
 COPY --chown=user requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+# Install local mode dependencies if IS_LOCAL is true
+COPY --chown=user requirements-dev.txt .
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt && \
+    if [ "$IS_LOCAL" = "true" ]; then \
+        pip install --no-cache-dir -r requirements-dev.txt; \
+    fi
 
 # Copy the application
 COPY --chown=user . .
@@ -25,8 +34,14 @@ ENV SENTENCE_TRANSFORMERS_HOME="$HOME/.cache/huggingface/sentence-transformers"
 ENV MEDGEMMA_HOME="$HOME/.cache/huggingface/sentence-transformers"
 
 # Prepare runtime dirs
-RUN mkdir -p $HOME/app/logs $HOME/app/cache $HOME/app/cache/hf $HOME/app/cache/outputs && \
+RUN mkdir -p $HOME/app/logs $HOME/app/cache $HOME/app/cache/hf $HOME/app/cache/outputs $HOME/app/data && \
     chown -R user:user $HOME/app
+
+# Download MedAlpaca model if in local mode
+RUN if [ "$IS_LOCAL" = "true" ]; then \
+        echo "Downloading MedAlpaca-13b model for local mode..."; \
+        python -c "from huggingface_hub import snapshot_download; import os; snapshot_download('medalpaca/medalpaca-13b', token=os.getenv('HF_TOKEN'), cache_dir='$HOME/.cache/huggingface')"; \
+    fi
 
 USER user
 

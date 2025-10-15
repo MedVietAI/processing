@@ -6,7 +6,7 @@ import random
 from typing import Dict, List, Tuple, Optional, Callable
 
 from utils.schema import sft_row, rag_row
-from utils.llm import NvidiaClient, KeyRotator
+from utils.cloud_llm import NvidiaClient, KeyRotator
 from vi.processing import should_translate, translate_rag_row
 from utils import augment as A
 
