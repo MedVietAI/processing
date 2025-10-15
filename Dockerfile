@@ -10,7 +10,7 @@ ENV HOME=/home/user
 WORKDIR $HOME/app
 
 # Set dynamic mode environment variable (default to cloud mode)
-ARG IS_LOCAL=true
+ARG IS_LOCAL=false
 ENV IS_LOCAL=${IS_LOCAL}
 
 # Install Python dependencies first (better layer caching)
