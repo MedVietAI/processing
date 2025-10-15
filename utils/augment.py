@@ -224,11 +224,11 @@ def retry_invalid_response(text: str, paraphraser, max_retries: int = 3) -> str:
                 retry_text = paraphraser.paraphrase(text, difficulty="easy")
             elif attempt == 1:
                 # Second try: More aggressive paraphrasing with medical focus
-                medical_prompt = f"Rewrite this medical response to be more professional and accurate:\n\n{text}"
+                medical_prompt = f"Rewrite this medical response to be more professional and accurate. Return only the rewritten response without any introduction or commentary:\n\n{text}"
                 retry_text = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=medical_prompt)
             else:
                 # Third try: Direct medical content generation
-                medical_prompt = f"Provide a professional medical response to this question:\n\n{text}"
+                medical_prompt = f"Provide a professional medical response to this question. Return only the medical response without any introduction or commentary:\n\n{text}"
                 retry_text = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=medical_prompt)
             
             if retry_text and not is_invalid_response(retry_text):
@@ -274,9 +274,8 @@ def enhance_medical_terminology(text: str, paraphraser) -> str:
                 return enhanced
         else:
             prompt = (
-                "Improve the medical terminology in this text while preserving all factual information:\n\n"
-                f"{text}\n\n"
-                "Return only the improved text with better medical terminology:"
+                "Improve the medical terminology in this text while preserving all factual information. Return only the improved text with better medical terminology without any introduction or commentary:\n\n"
+                f"{text}"
             )
             
             enhanced = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=prompt)
@@ -298,10 +297,10 @@ def create_clinical_scenarios(question: str, answer: str, paraphraser) -> list:
         else:
             # Fallback to original implementation
             context_prompts = [
-                f"Rewrite this medical question as if asked by a patient in an emergency room:\n\n{question}",
-                f"Rewrite this medical question as if asked by a patient in a routine checkup:\n\n{question}",
-                f"Rewrite this medical question as if asked by a patient with chronic conditions:\n\n{question}",
-                f"Rewrite this medical question as if asked by a patient's family member:\n\n{question}"
+                f"Rewrite this medical question as if asked by a patient in an emergency room. Return only the rewritten question without any introduction or commentary:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient in a routine checkup. Return only the rewritten question without any introduction or commentary:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient with chronic conditions. Return only the rewritten question without any introduction or commentary:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient's family member. Return only the rewritten question without any introduction or commentary:\n\n{question}"
             ]
             
             for i, prompt in enumerate(context_prompts):

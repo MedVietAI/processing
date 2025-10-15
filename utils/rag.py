@@ -56,19 +56,9 @@ class RAGProcessor:
         if not text or len(text.strip()) < 10:
             return text
             
-        prompt = f"""
-        You are a medical data cleaning expert. Clean the following text by:
-        1. Remove conversational elements (greetings, pleasantries)
-        2. Remove non-medical small talk and social interactions
-        3. Keep only medically relevant information
-        4. Preserve clinical facts, symptoms, diagnoses, treatments, and medical advice
-        5. Maintain professional medical language
-        6. Return only cleaned medical content in 1-2 concise sentences suitable for dense retrieval embeddings. No lists, no headers.
+        prompt = f"""Clean the following text by removing conversational elements (greetings, pleasantries), non-medical small talk, and social interactions. Keep only medically relevant information while preserving clinical facts, symptoms, diagnoses, treatments, and medical advice. Maintain professional medical language. Return only cleaned medical content in 1-2 concise sentences suitable for dense retrieval embeddings. No lists, no headers, no introduction or commentary:
 
-        Text to clean:
-        {text}
-
-        Cleaned medical content:"""
+{text}"""
 
         try:
             if self.is_local and self.medalpaca_client:
@@ -93,13 +83,11 @@ class RAGProcessor:
         if not question or not answer:
             return ""
             
-        prompt = f"""You are a medical knowledge expert. Given a medical question and its answer, generate a brief relevant medical context that helps retrieval. Limit to 1–2 sentences, concise, avoid boilerplate, no enumerations.
+        prompt = f"""Given a medical question and its answer, generate a brief relevant medical context that helps retrieval. Limit to 1–2 sentences, concise, avoid boilerplate, no enumerations. Return only the medical context without any introduction or commentary:
 
         Question: {question}
 
-        Answer: {answer}
-
-        Generate a concise medical context:"""
+        Answer: {answer}"""
 
         try:
             if self.is_local and self.medalpaca_client:

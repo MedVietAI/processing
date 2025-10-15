@@ -212,24 +212,20 @@ def _get_answer_style_prompt(strategy: str, question: str, original_answer: str)
     """Generate style-specific prompts for answer enhancement with medical focus"""
     prompts = {
         "concise": (
-            "You are a medical professional. Rewrite this medical answer to be more concise while preserving all key medical information, clinical facts, and diagnostic details:\n\n"
-            f"Original answer: {original_answer}\n\n"
-            "Concise medical answer:"
+            "Rewrite this medical answer to be more concise while preserving all key medical information, clinical facts, and diagnostic details. Return only the rewritten answer without any introduction or commentary:\n\n"
+            f"{original_answer}"
         ),
         "detailed": (
-            "You are a medical expert. Expand this medical answer with more detailed explanations, clinical context, and additional medical information while maintaining accuracy:\n\n"
-            f"Original answer: {original_answer}\n\n"
-            "Detailed medical answer:"
+            "Expand this medical answer with more detailed explanations, clinical context, and additional medical information while maintaining accuracy. Return only the expanded answer without any introduction or commentary:\n\n"
+            f"{original_answer}"
         ),
         "clinical": (
-            "You are a clinical specialist. Rewrite this answer using more formal clinical language, precise medical terminology, and professional medical communication style:\n\n"
-            f"Original answer: {original_answer}\n\n"
-            "Clinical medical answer:"
+            "Rewrite this answer using more formal clinical language, precise medical terminology, and professional medical communication style. Return only the rewritten answer without any introduction or commentary:\n\n"
+            f"{original_answer}"
         ),
         "patient_friendly": (
-            "You are a medical professional. Rewrite this medical answer in simpler, more patient-friendly language while keeping it medically accurate and informative:\n\n"
-            f"Original answer: {original_answer}\n\n"
-            "Patient-friendly medical answer:"
+            "Rewrite this medical answer in simpler, more patient-friendly language while keeping it medically accurate and informative. Return only the rewritten answer without any introduction or commentary:\n\n"
+            f"{original_answer}"
         )
     }
     return prompts.get(strategy, f"Paraphrase this medical answer: {original_answer}")
@@ -238,24 +234,20 @@ def _get_question_style_prompt(strategy: str, original_question: str, answer: st
     """Generate style-specific prompts for question enhancement with medical focus"""
     prompts = {
         "clarifying": (
-            "You are a medical professional. Rewrite this medical question to ask for clarification or more specific medical information:\n\n"
-            f"Original question: {original_question}\n\n"
-            "Clarifying medical question:"
+            "Rewrite this medical question to ask for clarification or more specific medical information. Return only the rewritten question without any introduction or commentary:\n\n"
+            f"{original_question}"
         ),
         "follow_up": (
-            "You are a medical professional. Create a follow-up question that a patient might ask after this medical question, focusing on related medical concerns:\n\n"
-            f"Original question: {original_question}\n\n"
-            "Follow-up medical question:"
+            "Create a follow-up question that a patient might ask after this medical question, focusing on related medical concerns. Return only the follow-up question without any introduction or commentary:\n\n"
+            f"{original_question}"
         ),
         "symptom_focused": (
-            "You are a medical professional. Rewrite this question to focus more on symptoms, their characteristics, and clinical presentation:\n\n"
-            f"Original question: {original_question}\n\n"
-            "Symptom-focused medical question:"
+            "Rewrite this question to focus more on symptoms, their characteristics, and clinical presentation. Return only the rewritten question without any introduction or commentary:\n\n"
+            f"{original_question}"
         ),
         "treatment_focused": (
-            "You are a medical professional. Rewrite this question to focus more on treatment options, management strategies, and therapeutic approaches:\n\n"
-            f"Original question: {original_question}\n\n"
-            "Treatment-focused medical question:"
+            "Rewrite this question to focus more on treatment options, management strategies, and therapeutic approaches. Return only the rewritten question without any introduction or commentary:\n\n"
+            f"{original_question}"
         )
     }
     return prompts.get(strategy, f"Paraphrase this medical question: {original_question}")

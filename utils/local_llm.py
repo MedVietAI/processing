@@ -268,15 +268,13 @@ class LocalParaphraser:
             # Medical-specific paraphrasing prompts based on difficulty
             if difficulty == "easy":
                 prompt = (
-                    "You are a medical professional. Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy.\n\n"
-                    f"Original medical text: {text}\n\n"
-                    "Rewritten medical text:"
+                    "Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy. Return only the rewritten text without any introduction or commentary.\n\n"
+                    f"{text}"
                 )
             else:  # hard difficulty
                 prompt = (
-                    "You are a medical expert. Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone.\n\n"
-                    f"Original medical text: {text}\n\n"
-                    "Enhanced medical text:"
+                    "Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone. Return only the rewritten text without any introduction or commentary.\n\n"
+                    f"{text}"
                 )
         
         # Adjust temperature based on difficulty
@@ -292,15 +290,13 @@ class LocalParaphraser:
         # Medical-specific translation prompt
         if target_lang == "vi":
             prompt = (
-                "You are a medical translator. Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms.\n\n"
-                f"English medical text: {text}\n\n"
-                "Vietnamese medical translation:"
+                "Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms. Return only the translation without any introduction or commentary.\n\n"
+                f"{text}"
             )
         else:
             prompt = (
-                f"You are a medical translator. Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
-                f"Original medical text: {text}\n\n"
-                f"{target_lang} medical translation:"
+                f"Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
+                f"{text}"
             )
         
         result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.0)
@@ -319,15 +315,13 @@ class LocalParaphraser:
         # Then translate back to English with medical focus
         if via_lang == "vi":
             prompt = (
-                "You are a medical translator. Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate.\n\n"
-                f"Vietnamese medical text: {translated}\n\n"
-                "English medical translation:"
+                "Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate. Return only the translation without any introduction or commentary.\n\n"
+                f"{translated}"
             )
         else:
             prompt = (
-                f"You are a medical translator. Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
-                f"{via_lang} medical text: {translated}\n\n"
-                "English medical translation:"
+                f"Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
+                f"{translated}"
             )
         
         result = self.client.generate(prompt, max_tokens=min(900, len(text)+150), temperature=0.0)
@@ -336,15 +330,9 @@ class LocalParaphraser:
     def consistency_check(self, user: str, output: str) -> bool:
         """Check consistency using MedAlpaca with medical validation focus"""
         prompt = (
-            "You are a medical quality assurance expert. Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider:\n"
-            "1. Medical accuracy and clinical appropriateness\n"
-            "2. Consistency with the question asked\n"
-            "3. Safety and professional medical standards\n"
-            "4. Completeness of the medical information\n\n"
-            "Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
+            "Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider medical accuracy, clinical appropriateness, consistency with the question, safety standards, and completeness of medical information. Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
             f"Question/Context: {user}\n\n"
-            f"Medical Answer: {output}\n\n"
-            "Evaluation:"
+            f"Medical Answer: {output}"
         )
         
         result = self.client.generate(prompt, max_tokens=5, temperature=0.0)
@@ -356,15 +344,9 @@ class LocalParaphraser:
             return False
             
         prompt = (
-            "You are a medical accuracy validator. Evaluate if the medical answer is accurate and appropriate for the question. Consider:\n"
-            "1. Medical facts and clinical knowledge\n"
-            "2. Appropriate medical terminology\n"
-            "3. Clinical reasoning and logic\n"
-            "4. Safety considerations\n\n"
-            "Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
+            "Evaluate if the medical answer is accurate and appropriate for the question. Consider medical facts, clinical knowledge, appropriate medical terminology, clinical reasoning, logic, and safety considerations. Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
             f"Medical Question: {question}\n\n"
-            f"Medical Answer: {answer}\n\n"
-            "Medical Accuracy Assessment:"
+            f"Medical Answer: {answer}"
         )
         
         result = self.client.generate(prompt, max_tokens=5, temperature=0.0)
@@ -376,9 +358,8 @@ class LocalParaphraser:
             return text
             
         prompt = (
-            "You are a medical terminology expert. Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate.\n\n"
-            f"Original text: {text}\n\n"
-            "Enhanced medical text:"
+            "Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate. Return only the improved text without any introduction or commentary.\n\n"
+            f"{text}"
         )
         
         result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.1)
@@ -391,19 +372,19 @@ class LocalParaphraser:
         # Different clinical context prompts
         context_prompts = [
             (
-                "You are a medical professional. Rewrite this medical question as if asked by a patient in an emergency room setting:\n\nOriginal question: {question}\n\nEmergency room question:",
+                "Rewrite this medical question as if asked by a patient in an emergency room setting. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "emergency_room"
             ),
             (
-                "You are a medical professional. Rewrite this medical question as if asked by a patient during a routine checkup:\n\nOriginal question: {question}\n\nRoutine checkup question:",
+                "Rewrite this medical question as if asked by a patient during a routine checkup. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "routine_checkup"
             ),
             (
-                "You are a medical professional. Rewrite this medical question as if asked by a patient with chronic conditions:\n\nOriginal question: {question}\n\nChronic care question:",
+                "Rewrite this medical question as if asked by a patient with chronic conditions. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "chronic_care"
             ),
             (
-                "You are a medical professional. Rewrite this medical question as if asked by a patient's family member:\n\nOriginal question: {question}\n\nFamily inquiry question:",
+                "Rewrite this medical question as if asked by a patient's family member. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "family_inquiry"
             )
         ]

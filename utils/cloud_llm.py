@@ -153,15 +153,13 @@ class Paraphraser:
             # Optimized medical paraphrasing prompts based on difficulty
             if difficulty == "easy":
                 prompt = (
-                    "You are a medical professional. Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy.\n\n"
-                    f"Original medical text: {text}\n\n"
-                    "Rewritten medical text:"
+                    "Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy. Return only the rewritten text without any introduction or commentary.\n\n"
+                    f"{text}"
                 )
             else:  # hard difficulty
                 prompt = (
-                    "You are a medical expert. Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone.\n\n"
-                    f"Original medical text: {text}\n\n"
-                    "Enhanced medical text:"
+                    "Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone. Return only the rewritten text without any introduction or commentary.\n\n"
+                    f"{text}"
                 )
         
         # Optimize temperature and token limits based on difficulty
@@ -187,15 +185,13 @@ class Paraphraser:
         # Optimized medical translation prompts
         if target_lang == "vi":
             prompt = (
-                "You are a medical translator. Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms.\n\n"
-                f"English medical text: {text}\n\n"
-                "Vietnamese medical translation:"
+                "Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms. Return only the translation without any introduction or commentary.\n\n"
+                f"{text}"
             )
         else:
             prompt = (
-                f"You are a medical translator. Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
-                f"Original medical text: {text}\n\n"
-                f"{target_lang} medical translation:"
+                f"Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
+                f"{text}"
             )
         
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(800, len(text)+100))
@@ -210,15 +206,13 @@ class Paraphraser:
         # Optimized backtranslation prompt with medical focus
         if via_lang == "vi":
             prompt = (
-                "You are a medical translator. Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate.\n\n"
-                f"Vietnamese medical text: {mid}\n\n"
-                "English medical translation:"
+                "Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate. Return only the translation without any introduction or commentary.\n\n"
+                f"{mid}"
             )
         else:
             prompt = (
-                f"You are a medical translator. Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
-                f"{via_lang} medical text: {mid}\n\n"
-                "English medical translation:"
+                f"Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
+                f"{mid}"
             )
         
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(900, len(text)+150))
@@ -230,15 +224,9 @@ class Paraphraser:
     def consistency_check(self, user: str, output: str) -> bool:
         """Return True if 'output' appears supported by 'user' (context/question). Optimized medical validation."""
         prompt = (
-            "You are a medical quality assurance expert. Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider:\n"
-            "1. Medical accuracy and clinical appropriateness\n"
-            "2. Consistency with the question asked\n"
-            "3. Safety and professional medical standards\n"
-            "4. Completeness of the medical information\n\n"
-            "Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
+            "Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider medical accuracy, clinical appropriateness, consistency with the question, safety standards, and completeness of medical information. Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
             f"Question/Context: {user}\n\n"
-            f"Medical Answer: {output}\n\n"
-            "Evaluation:"
+            f"Medical Answer: {output}"
         )
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=5)
         if not out:
@@ -251,15 +239,9 @@ class Paraphraser:
             return False
             
         prompt = (
-            "You are a medical accuracy validator. Evaluate if the medical answer is accurate and appropriate for the question. Consider:\n"
-            "1. Medical facts and clinical knowledge\n"
-            "2. Appropriate medical terminology\n"
-            "3. Clinical reasoning and logic\n"
-            "4. Safety considerations\n\n"
-            "Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
+            "Evaluate if the medical answer is accurate and appropriate for the question. Consider medical facts, clinical knowledge, appropriate medical terminology, clinical reasoning, logic, and safety considerations. Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
             f"Medical Question: {question}\n\n"
-            f"Medical Answer: {answer}\n\n"
-            "Medical Accuracy Assessment:"
+            f"Medical Answer: {answer}"
         )
         
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=5)
@@ -273,9 +255,8 @@ class Paraphraser:
             return text
             
         prompt = (
-            "You are a medical terminology expert. Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate.\n\n"
-            f"Original text: {text}\n\n"
-            "Enhanced medical text:"
+            "Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate. Return only the improved text without any introduction or commentary.\n\n"
+            f"{text}"
         )
         
         out = self.nv.generate(prompt, temperature=0.1, max_tokens=min(800, len(text)+100))
@@ -290,26 +271,26 @@ class Paraphraser:
         # Different clinical context prompts
         context_prompts = [
             (
-                "Rewrite this medical question as if asked by a patient in an emergency room setting:",
+                "Rewrite this medical question as if asked by a patient in an emergency room setting. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "emergency_room"
             ),
             (
-                "Rewrite this medical question as if asked by a patient during a routine checkup:",
+                "Rewrite this medical question as if asked by a patient during a routine checkup. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "routine_checkup"
             ),
             (
-                "Rewrite this medical question as if asked by a patient with chronic conditions:",
+                "Rewrite this medical question as if asked by a patient with chronic conditions. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "chronic_care"
             ),
             (
-                "Rewrite this medical question as if asked by a patient's family member:",
+                "Rewrite this medical question as if asked by a patient's family member. Return only the rewritten question without any introduction or commentary:\n\n{question}",
                 "family_inquiry"
             )
         ]
         
         for prompt_template, scenario_type in context_prompts:
             try:
-                prompt = f"{prompt_template}\n\nOriginal question: {question}\n\nRewritten question:"
+                prompt = prompt_template.format(question=question)
                 scenario_question = self.paraphrase(question, difficulty="hard", custom_prompt=prompt)
                 
                 if scenario_question and not self._is_invalid_response(scenario_question):
