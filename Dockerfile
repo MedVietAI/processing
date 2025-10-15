@@ -13,13 +13,16 @@ WORKDIR $HOME/app
 ARG IS_LOCAL=false
 ENV IS_LOCAL=${IS_LOCAL}
 
-# Install Python dependencies first (better layer caching)
+# Install Python dependencies based on mode (better layer caching)
 COPY --chown=user requirements.txt .
-# Install local mode dependencies if IS_LOCAL is true
 COPY --chown=user requirements-dev.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt && \
+RUN pip install --upgrade pip && \
     if [ "$IS_LOCAL" = "true" ]; then \
+        echo "Installing LOCAL mode dependencies (MedAlpaca-13b)"; \
         pip install --no-cache-dir -r requirements-dev.txt; \
+    else \
+        echo "Installing CLOUD mode dependencies (NVIDIA/Gemini APIs)"; \
+        pip install --no-cache-dir -r requirements.txt; \
     fi
 
 # Copy the application

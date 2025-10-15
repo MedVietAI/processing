@@ -1,6 +1,18 @@
 # Local mode dependencies for MedAlpaca-13b inference
+# Core framework dependencies
+fastapi
+uvicorn[standard]
+python-dotenv
+huggingface_hub
+requests
+orjson
+ftfy
+langid
+
+# Local LLM dependencies
 torch>=2.0.0
 torch-cuda>=2.0.0
+transformers>=4.30.0
 accelerate>=0.20.0
 bitsandbytes>=0.41.0
 peft>=0.4.0
@@ -8,3 +20,8 @@ datasets>=2.14.0
 evaluate>=0.4.0
 scipy>=1.10.0
 scikit-learn>=1.3.0
+sentencepiece
+sacremoses
+
+# Vietnamese translation (Opus model fallback)
+# Note: google-genai and google-auth packages are excluded for local mode

@@ -1,17 +1,25 @@
+# Cloud mode dependencies for NVIDIA/Gemini API integration
+# Core framework dependencies
 fastapi
 uvicorn[standard]
 python-dotenv
 huggingface_hub
 requests
+orjson
+ftfy
+langid
+
+# Cloud API dependencies
 google-genai
 google-api-python-client
 google-auth
 google-auth-httplib2
 google-auth-oauthlib
-orjson
-ftfy
-langid
+
+# Vietnamese translation (Opus model fallback)
 transformers
 torch
 sentencepiece
 sacremoses
+
+# Note: Heavy local LLM dependencies (accelerate, bitsandbytes, etc.) are excluded for cloud mode

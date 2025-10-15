@@ -60,8 +60,8 @@ elif [ "$1" = "cloud" ]; then
 else
     # Interactive mode selection
     echo "Please select the runtime mode:"
-    echo "1) Local mode (MedAlpaca-13b) - No API costs, complete privacy"
-    echo "2) Cloud mode (NVIDIA/Gemini APIs) - Faster processing, requires API keys"
+    echo "1) Local mode (MedAlpaca-13b) - No API costs, complete privacy, heavy dependencies"
+    echo "2) Cloud mode (NVIDIA/Gemini APIs) - Faster processing, requires API keys, lightweight"
     echo ""
     
     while true; do
@@ -83,9 +83,13 @@ if prompt_yes_no "Would you like to build/rebuild the Docker image?"; then
     echo ""
     if [ "$MODE" = "local" ]; then
         echo "🏠 Building in LOCAL mode (MedAlpaca-13b)..."
+        echo "   - Installing local LLM dependencies (torch-cuda, accelerate, bitsandbytes, etc.)"
+        echo "   - Excluding cloud API dependencies (google-genai, google-auth, etc.)"
         docker build --build-arg IS_LOCAL=true -t medai-processing:local .
     else
         echo "☁️  Building in CLOUD mode (NVIDIA/Gemini APIs)..."
+        echo "   - Installing cloud API dependencies (google-genai, google-auth, etc.)"
+        echo "   - Excluding heavy local LLM dependencies (torch-cuda, accelerate, bitsandbytes, etc.)"
         docker build --build-arg IS_LOCAL=false -t medai-processing:cloud .
     fi
     
