@@ -126,20 +126,82 @@ class Paraphraser:
         self.gm_hard = None  # Disabled - only use easy model
         logger.info("Paraphraser initialized: NVIDIA -> GEMINI_EASY (GEMINI_HARD disabled)")
 
-    # Regex-based cleaning resp from quotes
+    # Enhanced cleaning to remove conversational elements and comments
     def _clean_resp(self, resp: str) -> str:
         if not resp: return resp
         txt = resp.strip()
-        # Remove common boilerplate prefixes
+        
+        # Remove common conversational prefixes and comments
+        prefixes_to_remove = [
+            "Here's a rewritten version of",
+            "Here is a rewritten version of",
+            "Here's the rewritten text:",
+            "Here is the rewritten text:",
+            "Here's the translation:",
+            "Here is the translation:",
+            "Here's the enhanced text:",
+            "Here is the enhanced text:",
+            "Here's the improved text:",
+            "Here is the improved text:",
+            "Here's the medical context:",
+            "Here is the medical context:",
+            "Here's the cleaned text:",
+            "Here is the cleaned text:",
+            "Here's the answer:",
+            "Here is the answer:",
+            "Here's a paraphrased version:",
+            "Here is a paraphrased version:",
+            "Paraphrased version:",
+            "Paraphrased:",
+            "Sure,",
+            "Okay,",
+            "Certainly,",
+            "Of course,",
+            "I can help you with that.",
+            "I'll help you with that.",
+            "Let me help you with that.",
+            "I can rewrite that for you.",
+            "I'll rewrite that for you.",
+            "Let me rewrite that for you.",
+            "I can translate that for you.",
+            "I'll translate that for you.",
+            "Let me translate that for you.",
+        ]
+        
+        # Remove prefixes
+        for prefix in prefixes_to_remove:
+            if txt.lower().startswith(prefix.lower()):
+                txt = txt[len(prefix):].strip()
+                break
+        
+        # Remove common boilerplate prefixes with regex
+        import re
         for pat in [
             r"^Here is (a|the) .*?:\s*",
             r"^Paraphrased(?: version)?:\s*",
             r"^Sure[,.]?\s*",
-            r"^Okay[,.]?\s*"
+            r"^Okay[,.]?\s*",
+            r"^Certainly[,.]?\s*",
+            r"^Of course[,.]?\s*",
+            r"^I can .*?:\s*",
+            r"^I'll .*?:\s*",
+            r"^Let me .*?:\s*"
         ]:
-            import re
             txt = re.sub(pat, "", txt, flags=re.I)
-        return txt.strip()
+        
+        # Remove any remaining conversational elements
+        lines = txt.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and not any(phrase in line.lower() for phrase in [
+                "here's", "here is", "let me", "i can", "i'll", "sure,", "okay,", 
+                "certainly,", "of course,", "i hope this helps", "hope this helps",
+                "does this help", "is this what you", "let me know if"
+            ]):
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
 
     # ————— Paraphrase —————
     def paraphrase(self, text: str, difficulty: str = "easy", custom_prompt: str = None) -> str:

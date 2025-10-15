@@ -145,13 +145,40 @@ class MedAlpacaClient:
         if not text:
             return text
             
-        # Remove common prefixes and Alpaca format artifacts
+        # Remove common conversational prefixes and comments
         prefixes_to_remove = [
             "Answer:",
             "The answer is:",
             "Based on the information provided:",
             "Here's the answer:",
             "Here is the answer:",
+            "Here's a rewritten version:",
+            "Here is a rewritten version:",
+            "Here's the rewritten text:",
+            "Here is the rewritten text:",
+            "Here's the translation:",
+            "Here is the translation:",
+            "Here's the enhanced text:",
+            "Here is the enhanced text:",
+            "Here's the improved text:",
+            "Here is the improved text:",
+            "Here's the medical context:",
+            "Here is the medical context:",
+            "Here's the cleaned text:",
+            "Here is the cleaned text:",
+            "Sure,",
+            "Okay,",
+            "Certainly,",
+            "Of course,",
+            "I can help you with that.",
+            "I'll help you with that.",
+            "Let me help you with that.",
+            "I can rewrite that for you.",
+            "I'll rewrite that for you.",
+            "Let me rewrite that for you.",
+            "I can translate that for you.",
+            "I'll translate that for you.",
+            "Let me translate that for you.",
             "### Response:",
             "Response:",
             "Below is an instruction",
@@ -161,7 +188,7 @@ class MedAlpacaClient:
         
         text = text.strip()
         for prefix in prefixes_to_remove:
-            if text.startswith(prefix):
+            if text.lower().startswith(prefix.lower()):
                 text = text[len(prefix):].strip()
                 break
         
@@ -170,8 +197,20 @@ class MedAlpacaClient:
             text = text.split("### Response:")[-1].strip()
         if "### Input:" in text:
             text = text.split("### Input:")[0].strip()
-            
-        return text
+        
+        # Remove any remaining conversational elements
+        lines = text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            line = line.strip()
+            if line and not any(phrase in line.lower() for phrase in [
+                "here's", "here is", "let me", "i can", "i'll", "sure,", "okay,", 
+                "certainly,", "of course,", "i hope this helps", "hope this helps",
+                "does this help", "is this what you", "let me know if"
+            ]):
+                cleaned_lines.append(line)
+        
+        return '\n'.join(cleaned_lines).strip()
     
     def _snip(self, text: str, max_words: int = 12) -> str:
         """Truncate text for logging"""
