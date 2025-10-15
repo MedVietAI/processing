@@ -1,4 +1,9 @@
-Error response from daemon: Conflict. The container name "/temp-medai" is already in use by container "314b9562a045c52ae6e783712a35273696fc5bdb0ab8a3859b06ea00e1b15b3d". You have to remove (or rename) that container to be able to reuse that name.
-Successfully copied 7.17kB to temp-medai:/utils/drive_saver.py
-Error response from daemon: Could not find the file /utils in container temp-medai
+# Remove the existing container first
+docker rm temp-medai
 
+# Now try again with the correct path
+docker create --name temp-medai 25478abb6322
+docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py
+docker commit temp-medai medai-processing:patched
+docker rm temp-medai
+docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
