@@ -209,22 +209,54 @@ def _build_enriched_variants(user: str, out: str, paraphraser, opts: Dict, stats
     return variants
 
 def _get_answer_style_prompt(strategy: str, question: str, original_answer: str) -> str:
-    """Generate style-specific prompts for answer enhancement"""
+    """Generate style-specific prompts for answer enhancement with medical focus"""
     prompts = {
-        "concise": f"Rewrite this medical answer to be more concise while preserving all key medical information:\n\n{original_answer}",
-        "detailed": f"Expand this medical answer with more detailed explanations while maintaining accuracy:\n\n{original_answer}",
-        "clinical": f"Rewrite this answer using more formal clinical language and medical terminology:\n\n{original_answer}",
-        "patient_friendly": f"Rewrite this medical answer in simpler, more patient-friendly language while keeping it medically accurate:\n\n{original_answer}"
+        "concise": (
+            "You are a medical professional. Rewrite this medical answer to be more concise while preserving all key medical information, clinical facts, and diagnostic details:\n\n"
+            f"Original answer: {original_answer}\n\n"
+            "Concise medical answer:"
+        ),
+        "detailed": (
+            "You are a medical expert. Expand this medical answer with more detailed explanations, clinical context, and additional medical information while maintaining accuracy:\n\n"
+            f"Original answer: {original_answer}\n\n"
+            "Detailed medical answer:"
+        ),
+        "clinical": (
+            "You are a clinical specialist. Rewrite this answer using more formal clinical language, precise medical terminology, and professional medical communication style:\n\n"
+            f"Original answer: {original_answer}\n\n"
+            "Clinical medical answer:"
+        ),
+        "patient_friendly": (
+            "You are a medical professional. Rewrite this medical answer in simpler, more patient-friendly language while keeping it medically accurate and informative:\n\n"
+            f"Original answer: {original_answer}\n\n"
+            "Patient-friendly medical answer:"
+        )
     }
     return prompts.get(strategy, f"Paraphrase this medical answer: {original_answer}")
 
 def _get_question_style_prompt(strategy: str, original_question: str, answer: str) -> str:
-    """Generate style-specific prompts for question enhancement"""
+    """Generate style-specific prompts for question enhancement with medical focus"""
     prompts = {
-        "clarifying": f"Rewrite this medical question to ask for clarification or more specific information:\n\n{original_question}",
-        "follow_up": f"Create a follow-up question that a patient might ask after this medical question:\n\n{original_question}",
-        "symptom_focused": f"Rewrite this question to focus more on symptoms and their characteristics:\n\n{original_question}",
-        "treatment_focused": f"Rewrite this question to focus more on treatment options and management:\n\n{original_question}"
+        "clarifying": (
+            "You are a medical professional. Rewrite this medical question to ask for clarification or more specific medical information:\n\n"
+            f"Original question: {original_question}\n\n"
+            "Clarifying medical question:"
+        ),
+        "follow_up": (
+            "You are a medical professional. Create a follow-up question that a patient might ask after this medical question, focusing on related medical concerns:\n\n"
+            f"Original question: {original_question}\n\n"
+            "Follow-up medical question:"
+        ),
+        "symptom_focused": (
+            "You are a medical professional. Rewrite this question to focus more on symptoms, their characteristics, and clinical presentation:\n\n"
+            f"Original question: {original_question}\n\n"
+            "Symptom-focused medical question:"
+        ),
+        "treatment_focused": (
+            "You are a medical professional. Rewrite this question to focus more on treatment options, management strategies, and therapeutic approaches:\n\n"
+            f"Original question: {original_question}\n\n"
+            "Treatment-focused medical question:"
+        )
     }
     return prompts.get(strategy, f"Paraphrase this medical question: {original_question}")
 
@@ -321,7 +353,7 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 continue
 
             # 1) ALWAYS write the original (cleaned/style-standardised only)
-            # Enhanced medical accuracy validation
+            # Enhanced medical accuracy validation (optimized for both cloud and local modes)
             if not A.validate_medical_accuracy(user, out, paraphraser):
                 stats["medical_accuracy_failed"] = stats.get("medical_accuracy_failed", 0) + 1
                 applied.append("medical_accuracy_flag")
@@ -345,7 +377,12 @@ def _proc_med_dialog(source, path, writer, paraphraser, opts, sample_limit, stat
                 
                 # Add clinical scenarios for enhanced diversity
                 if opts.get("clinical_scenarios", True):
-                    clinical_scenarios = A.create_clinical_scenarios(user, out, paraphraser)
+                    # Use dedicated method if available (both cloud and local modes now support this)
+                    if hasattr(paraphraser, 'create_clinical_scenarios'):
+                        clinical_scenarios = paraphraser.create_clinical_scenarios(user, out)
+                    else:
+                        clinical_scenarios = A.create_clinical_scenarios(user, out, paraphraser)
+                    
                     for (scenario_q, scenario_a, scenario_tag) in clinical_scenarios:
                         rid_scenario = f"{rid}-scenario{random.randint(1000,9999)}"
                         _commit_row(writer, source, rid_scenario, "medical_dialogue", instr, scenario_q, scenario_a, opts, stats, [scenario_tag], dedupe_seen=dedupe_seen, translator=translator)

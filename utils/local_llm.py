@@ -385,39 +385,51 @@ class LocalParaphraser:
         return result if result else text
     
     def create_clinical_scenarios(self, question: str, answer: str) -> list:
-        """Create different clinical scenarios from Q&A pairs using MedAlpaca"""
+        """Create different clinical scenarios from Q&A pairs using MedAlpaca with batch optimization"""
         scenarios = []
         
         # Different clinical context prompts
         context_prompts = [
             (
-                "Rewrite this medical question as if asked by a patient in an emergency room setting:",
+                "You are a medical professional. Rewrite this medical question as if asked by a patient in an emergency room setting:\n\nOriginal question: {question}\n\nEmergency room question:",
                 "emergency_room"
             ),
             (
-                "Rewrite this medical question as if asked by a patient during a routine checkup:",
+                "You are a medical professional. Rewrite this medical question as if asked by a patient during a routine checkup:\n\nOriginal question: {question}\n\nRoutine checkup question:",
                 "routine_checkup"
             ),
             (
-                "Rewrite this medical question as if asked by a patient with chronic conditions:",
+                "You are a medical professional. Rewrite this medical question as if asked by a patient with chronic conditions:\n\nOriginal question: {question}\n\nChronic care question:",
                 "chronic_care"
             ),
             (
-                "Rewrite this medical question as if asked by a patient's family member:",
+                "You are a medical professional. Rewrite this medical question as if asked by a patient's family member:\n\nOriginal question: {question}\n\nFamily inquiry question:",
                 "family_inquiry"
             )
         ]
         
-        for prompt_template, scenario_type in context_prompts:
-            try:
-                prompt = f"{prompt_template}\n\nOriginal question: {question}\n\nRewritten question:"
-                scenario_question = self.client.generate(prompt, max_tokens=min(400, len(question)+50), temperature=0.2)
-                
-                if scenario_question and not self._is_invalid_response(scenario_question):
-                    scenarios.append((scenario_question, answer, scenario_type))
-            except Exception as e:
-                logger.warning(f"Failed to create clinical scenario {scenario_type}: {e}")
-                continue
+        # Use batch processing for better efficiency
+        try:
+            prompts = [prompt_template.format(question=question) for prompt_template, _ in context_prompts]
+            results = self.client.generate_batch(prompts, max_tokens=min(400, len(question)+50), temperature=0.2)
+            
+            for i, (result, (_, scenario_type)) in enumerate(zip(results, context_prompts)):
+                if result and not self._is_invalid_response(result):
+                    scenarios.append((result, answer, scenario_type))
+                    
+        except Exception as e:
+            logger.warning(f"Batch clinical scenario creation failed, falling back to individual: {e}")
+            # Fallback to individual processing
+            for prompt_template, scenario_type in context_prompts:
+                try:
+                    prompt = prompt_template.format(question=question)
+                    scenario_question = self.client.generate(prompt, max_tokens=min(400, len(question)+50), temperature=0.2)
+                    
+                    if scenario_question and not self._is_invalid_response(scenario_question):
+                        scenarios.append((scenario_question, answer, scenario_type))
+                except Exception as e:
+                    logger.warning(f"Failed to create clinical scenario {scenario_type}: {e}")
+                    continue
                 
         return scenarios
     

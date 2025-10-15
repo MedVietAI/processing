@@ -146,23 +146,35 @@ class Paraphraser:
         if not text or len(text) < 12:
             return text
         
-        # Use custom prompt if provided, otherwise use default
+        # Use custom prompt if provided, otherwise use optimized medical prompts
         if custom_prompt:
             prompt = custom_prompt
         else:
-            prompt = (
-                "Paraphrase the following medical text concisely, preserve meaning and clinical terms.\n"
-                "Do not fabricate or remove factual claims.\n" 
-                "Return ONLY the rewritten text, without any introduction, commentary.\n"+ text
-            )
+            # Optimized medical paraphrasing prompts based on difficulty
+            if difficulty == "easy":
+                prompt = (
+                    "You are a medical professional. Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy.\n\n"
+                    f"Original medical text: {text}\n\n"
+                    "Rewritten medical text:"
+                )
+            else:  # hard difficulty
+                prompt = (
+                    "You are a medical expert. Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone.\n\n"
+                    f"Original medical text: {text}\n\n"
+                    "Enhanced medical text:"
+                )
         
-        # Always try NVIDIA first
-        out = self.nv.generate(prompt, temperature=0.1, max_tokens=min(600, max(128, len(text)//2)))
+        # Optimize temperature and token limits based on difficulty
+        temperature = 0.1 if difficulty == "easy" else 0.3
+        max_tokens = min(600, max(128, len(text)//2))
+        
+        # Always try NVIDIA first (optimized for medical tasks)
+        out = self.nv.generate(prompt, temperature=temperature, max_tokens=max_tokens)
         if out: 
             return self._clean_resp(out)
         
-        # Only fallback to GEMINI_MODEL_EASY (ignore difficulty parameter)
-        out = self.gm_easy.generate(prompt, max_output_tokens=min(600, max(128, len(text)//2)))
+        # Fallback to GEMINI with optimized parameters
+        out = self.gm_easy.generate(prompt, max_output_tokens=max_tokens)
         if out:
             logger.info(f"[LLM][GEMINI] out={snip(self._clean_resp(out))}")
             return self._clean_resp(out)
@@ -171,7 +183,21 @@ class Paraphraser:
     # ————— Translate & Backtranslate —————
     def translate(self, text: str, target_lang: str = "vi") -> Optional[str]:
         if not text: return text
-        prompt = f"Translate to {target_lang}. Keep meaning exact, preserve medical terms:\n\n{text}"
+        
+        # Optimized medical translation prompts
+        if target_lang == "vi":
+            prompt = (
+                "You are a medical translator. Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms.\n\n"
+                f"English medical text: {text}\n\n"
+                "Vietnamese medical translation:"
+            )
+        else:
+            prompt = (
+                f"You are a medical translator. Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
+                f"Original medical text: {text}\n\n"
+                f"{target_lang} medical translation:"
+            )
+        
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(800, len(text)+100))
         if out: return out.strip()
         return self.gm_easy.generate(prompt, max_output_tokens=min(800, len(text)+100))
@@ -180,7 +206,21 @@ class Paraphraser:
         if not text: return text
         mid = self.translate(text, target_lang=via_lang)
         if not mid: return None
-        prompt = f"Translate the following Vietnamese text back to English, preserving the exact meaning:\n\n{mid}"
+        
+        # Optimized backtranslation prompt with medical focus
+        if via_lang == "vi":
+            prompt = (
+                "You are a medical translator. Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate.\n\n"
+                f"Vietnamese medical text: {mid}\n\n"
+                "English medical translation:"
+            )
+        else:
+            prompt = (
+                f"You are a medical translator. Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
+                f"{via_lang} medical text: {mid}\n\n"
+                "English medical translation:"
+            )
+        
         out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(900, len(text)+150))
         if out: return out.strip()
         res = self.gm_easy.generate(prompt, max_output_tokens=min(900, len(text)+150))
@@ -188,14 +228,116 @@ class Paraphraser:
 
     # ————— Consistency Judge (cheap, ratio-based) —————
     def consistency_check(self, user: str, output: str) -> bool:
-        """Return True if 'output' appears supported by 'user' (context/question). Soft heuristic via LLM."""
+        """Return True if 'output' appears supported by 'user' (context/question). Optimized medical validation."""
         prompt = (
-            "You are a strict medical QA validator. Given the USER input (question+context) "
-            "and the MODEL ANSWER, reply with exactly 'PASS' if the answer is supported and safe, "
-            "otherwise 'FAIL'. No extra text.\n\n"
-            f"USER:\n{user}\n\nANSWER:\n{output}"
+            "You are a medical quality assurance expert. Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider:\n"
+            "1. Medical accuracy and clinical appropriateness\n"
+            "2. Consistency with the question asked\n"
+            "3. Safety and professional medical standards\n"
+            "4. Completeness of the medical information\n\n"
+            "Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
+            f"Question/Context: {user}\n\n"
+            f"Medical Answer: {output}\n\n"
+            "Evaluation:"
         )
-        out = self.nv.generate(prompt, temperature=0.0, max_tokens=3)
+        out = self.nv.generate(prompt, temperature=0.0, max_tokens=5)
         if not out:
-            out = self.gm_easy.generate(prompt, max_output_tokens=3)
+            out = self.gm_easy.generate(prompt, max_output_tokens=5)
         return isinstance(out, str) and "PASS" in out.upper()
+    
+    def medical_accuracy_check(self, question: str, answer: str) -> bool:
+        """Check medical accuracy of Q&A pairs using cloud APIs"""
+        if not question or not answer:
+            return False
+            
+        prompt = (
+            "You are a medical accuracy validator. Evaluate if the medical answer is accurate and appropriate for the question. Consider:\n"
+            "1. Medical facts and clinical knowledge\n"
+            "2. Appropriate medical terminology\n"
+            "3. Clinical reasoning and logic\n"
+            "4. Safety considerations\n\n"
+            "Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
+            f"Medical Question: {question}\n\n"
+            f"Medical Answer: {answer}\n\n"
+            "Medical Accuracy Assessment:"
+        )
+        
+        out = self.nv.generate(prompt, temperature=0.0, max_tokens=5)
+        if not out:
+            out = self.gm_easy.generate(prompt, max_output_tokens=5)
+        return isinstance(out, str) and "ACCURATE" in out.upper()
+    
+    def enhance_medical_terminology(self, text: str) -> str:
+        """Enhance medical terminology in text using cloud APIs"""
+        if not text or len(text) < 20:
+            return text
+            
+        prompt = (
+            "You are a medical terminology expert. Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate.\n\n"
+            f"Original text: {text}\n\n"
+            "Enhanced medical text:"
+        )
+        
+        out = self.nv.generate(prompt, temperature=0.1, max_tokens=min(800, len(text)+100))
+        if not out:
+            out = self.gm_easy.generate(prompt, max_output_tokens=min(800, len(text)+100))
+        return out if out else text
+    
+    def create_clinical_scenarios(self, question: str, answer: str) -> list:
+        """Create different clinical scenarios from Q&A pairs using cloud APIs"""
+        scenarios = []
+        
+        # Different clinical context prompts
+        context_prompts = [
+            (
+                "Rewrite this medical question as if asked by a patient in an emergency room setting:",
+                "emergency_room"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient during a routine checkup:",
+                "routine_checkup"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient with chronic conditions:",
+                "chronic_care"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient's family member:",
+                "family_inquiry"
+            )
+        ]
+        
+        for prompt_template, scenario_type in context_prompts:
+            try:
+                prompt = f"{prompt_template}\n\nOriginal question: {question}\n\nRewritten question:"
+                scenario_question = self.paraphrase(question, difficulty="hard", custom_prompt=prompt)
+                
+                if scenario_question and not self._is_invalid_response(scenario_question):
+                    scenarios.append((scenario_question, answer, scenario_type))
+            except Exception as e:
+                logger.warning(f"Failed to create clinical scenario {scenario_type}: {e}")
+                continue
+                
+        return scenarios
+    
+    def _is_invalid_response(self, text: str) -> bool:
+        """Check if response is invalid"""
+        if not text or not isinstance(text, str):
+            return True
+        
+        text_lower = text.lower().strip()
+        invalid_patterns = [
+            "fail", "invalid", "i couldn't", "i can't", "i cannot", "unable to",
+            "sorry", "error", "not available", "no answer", "insufficient",
+            "don't know", "do not know", "not sure", "cannot determine",
+            "unable to provide", "not possible", "not applicable", "n/a"
+        ]
+        
+        if len(text_lower) < 3:
+            return True
+        
+        for pattern in invalid_patterns:
+            if pattern in text_lower:
+                return True
+        
+        return False
