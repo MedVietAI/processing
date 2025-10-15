@@ -1,9 +1,15 @@
-# Remove the existing container first
+# Create and start the container to ensure proper directory structure
+docker run -d --name temp-medai 25478abb6322 tail -f /dev/null
+
+# Now copy the file to the correct location
+docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py
+
+# Commit the changes
+docker commit temp-medai medai-processing:patched
+
+# Clean up
+docker stop temp-medai
 docker rm temp-medai
 
-# Now try again with the correct path
-docker create --name temp-medai 25478abb6322
-docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py
-docker commit temp-medai medai-processing:patched
-docker rm temp-medai
+# Run your new image
 docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
