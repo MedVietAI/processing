@@ -19,38 +19,6 @@ prompt_yes_no() {
     done
 }
 
-# Function to get environment variables
-get_env_vars() {
-    local mode="$1"
-    local env_vars=""
-    
-    if [ "$mode" = "local" ]; then
-        echo "🔑 Please provide your Hugging Face token:"
-        read -p "HF_TOKEN: " hf_token
-        if [ -n "$hf_token" ]; then
-            env_vars="-e HF_TOKEN=$hf_token"
-        else
-            echo "⚠️  Warning: No HF_TOKEN provided. Model download may fail."
-        fi
-    else
-        echo "🔑 Please provide your API keys:"
-        read -p "NVIDIA_API_1: " nvidia_key
-        read -p "GEMINI_API_1: " gemini_key
-        
-        if [ -n "$nvidia_key" ]; then
-            env_vars="$env_vars -e NVIDIA_API_1=$nvidia_key"
-        fi
-        if [ -n "$gemini_key" ]; then
-            env_vars="$env_vars -e GEMINI_API_1=$gemini_key"
-        fi
-        
-        if [ -z "$nvidia_key" ] && [ -z "$gemini_key" ]; then
-            echo "⚠️  Warning: No API keys provided. Processing may fail."
-        fi
-    fi
-    
-    echo "$env_vars"
-}
 
 # Check if mode is specified as argument
 if [ "$1" = "local" ]; then
@@ -112,9 +80,6 @@ if prompt_yes_no "Would you like to run the Docker container now?"; then
     echo ""
     echo "🚀 Starting Docker container..."
     
-    # Get environment variables
-    ENV_VARS=$(get_env_vars "$MODE")
-    
     # Set the image name based on mode
     if [ "$MODE" = "local" ]; then
         IMAGE_NAME="medai-processing:local"
@@ -124,10 +89,55 @@ if prompt_yes_no "Would you like to run the Docker container now?"; then
         IS_LOCAL_FLAG="-e IS_LOCAL=false"
     fi
     
+    # Build docker run command
+    DOCKER_CMD="docker run -p 7860:7860 $IS_LOCAL_FLAG"
+    
+    # Add environment variables
+    if [ "$MODE" = "local" ]; then
+        echo "🔑 Please provide your Hugging Face token:"
+        read -p "HF_TOKEN: " hf_token
+        if [ -n "$hf_token" ]; then
+            # Validate HF token format (should start with hf_)
+            if [[ "$hf_token" =~ ^hf_ ]]; then
+                DOCKER_CMD="$DOCKER_CMD -e HF_TOKEN=\"$hf_token\""
+            else
+                echo "⚠️  Warning: HF token should start with 'hf_'. Adding anyway..."
+                DOCKER_CMD="$DOCKER_CMD -e HF_TOKEN=\"$hf_token\""
+            fi
+        else
+            echo "⚠️  Warning: No HF_TOKEN provided. Model download may fail."
+        fi
+    else
+        echo "🔑 Please provide your API keys:"
+        read -p "NVIDIA_API_1: " nvidia_key
+        read -p "GEMINI_API_1: " gemini_key
+        
+        if [ -n "$nvidia_key" ]; then
+            DOCKER_CMD="$DOCKER_CMD -e NVIDIA_API_1=\"$nvidia_key\""
+        fi
+        if [ -n "$gemini_key" ]; then
+            DOCKER_CMD="$DOCKER_CMD -e GEMINI_API_1=\"$gemini_key\""
+        fi
+        
+        if [ -z "$nvidia_key" ] && [ -z "$gemini_key" ]; then
+            echo "⚠️  Warning: No API keys provided. Processing may fail."
+        fi
+    fi
+    
+    # Add image name
+    DOCKER_CMD="$DOCKER_CMD $IMAGE_NAME"
+    
+    # Check if image exists
+    if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+        echo "❌ Error: Docker image '$IMAGE_NAME' not found!"
+        echo "   Please build the image first by running this script and choosing 'yes' for building."
+        exit 1
+    fi
+    
     # Run the container
-    echo "Running: docker run -p 7860:7860 $IS_LOCAL_FLAG $ENV_VARS $IMAGE_NAME"
+    echo "Running: $DOCKER_CMD"
     echo ""
-    docker run -p 7860:7860 $IS_LOCAL_FLAG $ENV_VARS $IMAGE_NAME
+    eval "$DOCKER_CMD"
 else
     echo ""
     echo "📋 Manual run command:"
