@@ -1,8 +1,8 @@
 # Create and start the container to ensure proper directory structure
-docker run -d --name temp-medai 25478abb6322 tail -f /dev/null
+docker run -d --name medai-processing 25478abb6322 tail -f /dev/null
 
 # Now copy the file to the correct location
-docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py  
+docker cp utils/drive_saver.py medai-processing:/utils/drive_saver.py  
 
 # Commit the changes
 docker commit temp-medai medai-processing:patched
@@ -23,3 +23,12 @@ docker stop temp-medai
 docker commit temp-medai medai-processing:patched
 docker rm temp-medai
 docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
+
+PS C:\Users\sawko\Downloads\processing-main> docker run -d --name medai-processing 25478abb6322
+3df959e01f83d2dfce7239b655de8bc83a52aef711d3a530a6c7456cc8e2a445
+PS C:\Users\sawko\Downloads\processing-main> docker cp utils/drive_saver.py medai-processing:/utils/drive_saver.py  
+>>
+Successfully copied 7.17kB to medai-processing:/utils/drive_saver.py
+Error response from daemon: Could not find the file /utils in container medai-processing
+PS C:\Users\sawko\Downloads\processing-main> docker ps
+CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES
