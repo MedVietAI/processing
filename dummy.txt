@@ -1,40 +1,5 @@
-docker run --rm -it 25478abb6322 ls -la home/user/app
-
-# Check the actual working directory in your image
-docker run --rm -it 25478abb6322 pwd
-docker run --rm -it 25478abb6322 find / -name "*.py" -type f | head -10
-
 docker create --name temp-medai 25478abb6322
 docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py
 docker commit temp-medai medai-processing:patched
 docker rm temp-medai
 docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
-
-PS C:\Users\sawko\Downloads\processing-main> docker run --rm -it 25478abb6322 ls -la .            
-total 112
-drwxr-xr-x 1 user user  4096 Oct 15 04:54 .
-drwx------ 1 user user  4096 Oct 15 04:53 ..
--rwxrwxrwx 1 user user  6148 Oct 15 04:24 .DS_Store
--rwxrwxrwx 1 user user    23 Oct 15 04:24 .dockerignore
--rwxrwxrwx 1 user user  1298 Oct 15 04:28 .env
--rwxrwxrwx 1 user user  1519 Oct 15 04:24 .gitattributes
--rwxrwxrwx 1 user user    60 Oct 15 04:24 .gitignore
--rwxrwxrwx 1 user user  1941 Oct 15 04:47 Dockerfile
--rwxrwxrwx 1 user user 22487 Oct 15 04:24 app.py
--rwxrwxrwx 1 user user  4416 Oct 15 04:24 build.sh
-drwxr-xr-x 4 user user  4096 Oct 15 04:54 cache
-drwxr-xr-x 2 user user  4096 Oct 15 04:54 data
-drwxrwxrwx 2 user user  4096 Oct 15 04:24 docs
-drwxr-xr-x 2 user user  4096 Oct 15 04:54 logs
--rwxrwxrwx 1 user user   227 Oct 15 04:24 mount_drive.py
--rwxrwxrwx 1 user user   516 Oct 15 04:44 requirements-dev.txt
--rwxrwxrwx 1 user user   483 Oct 15 04:24 requirements.txt
-drwxrwxrwx 2 user user  4096 Oct 15 04:24 scritps
--rwxrwxrwx 1 user user    42 Oct 15 04:42 test.py
-drwxrwxrwx 2 user user  4096 Oct 15 04:24 utils
-drwxrwxrwx 2 user user  4096 Oct 15 04:24 vi
-
-
-PS C:\Users\sawko\Downloads\processing-main> docker run --rm -it 25478abb6322 ls -la home/user/app
->>
-ls: cannot access 'home/user/app': No such file or directory
