@@ -1,3 +1,11 @@
-314b9562a045c52ae6e783712a35273696fc5bdb0ab8a3859b06ea00e1b15b3d
-Successfully copied 7.17kB to temp-medai:/app/utils/drive_saver.py
-Error response from daemon: Could not find the file /app/utils in container temp-medai
+docker run --rm -it <YOUR_IMAGE_ID> ls -la /app
+
+# Check the actual working directory in your image
+docker run --rm -it <YOUR_IMAGE_ID> pwd
+docker run --rm -it <YOUR_IMAGE_ID> find / -name "*.py" -type f | head -10
+
+docker create --name temp-medai <YOUR_IMAGE_ID>
+docker cp utils/drive_saver.py temp-medai:/utils/drive_saver.py
+docker commit temp-medai medai-processing:patched
+docker rm temp-medai
+docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
