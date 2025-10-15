@@ -1,9 +1,30 @@
 # Save final post-process to Google Drive
 import os, json, logging
 from typing import Optional
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+
+# Conditional imports for Google Drive (only when needed)
+try:
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    from googleapiclient.http import MediaFileUpload
+    GOOGLE_DRIVE_AVAILABLE = True
+except ImportError:
+    GOOGLE_DRIVE_AVAILABLE = False
+    # Create dummy classes for when Google Drive is not available
+    class service_account:
+        class Credentials:
+            @staticmethod
+            def from_service_account_info(*args, **kwargs):
+                raise ImportError("Google Drive dependencies not available")
+    
+    class build:
+        @staticmethod
+        def build(*args, **kwargs):
+            raise ImportError("Google Drive dependencies not available")
+    
+    class MediaFileUpload:
+        def __init__(self, *args, **kwargs):
+            raise ImportError("Google Drive dependencies not available")
 
 from utils.token import get_credentials
 
@@ -23,11 +44,21 @@ class DriveSaver:
         self.folder_id = default_folder_id or os.getenv("GDRIVE_FOLDER_ID")
         self.supports_all_drives = os.getenv("GDRIVE_FOLDER_IS_SHARED", "false").lower() in ("1","true","yes")
         self.allow_sa_fallback = os.getenv("GDRIVE_ALLOW_SA_FALLBACK", "false").lower() in ("1","true","yes")
+        
+        # Check if Google Drive is available
+        if not GOOGLE_DRIVE_AVAILABLE:
+            logger.warning("⚠️ Google Drive dependencies not available - DriveSaver will be disabled")
+            return
+            
         if not self.folder_id:
             logger.warning("📁 No GDRIVE_FOLDER_ID set; uploads must provide folder_id explicitly")
         self._initialize_service()
 
     def _initialize_service(self):
+        if not GOOGLE_DRIVE_AVAILABLE:
+            logger.warning("⚠️ Google Drive dependencies not available - skipping service initialization")
+            return
+            
         creds = get_credentials()
         if creds:
             logger.info("✅ Using OAuth credentials")
@@ -59,6 +90,10 @@ class DriveSaver:
         logger.info("✅ Google Drive service initialized")
 
     def upload_file_to_drive(self, file_path: str, folder_id: Optional[str] = None, mimetype: Optional[str] = None) -> bool:
+        if not GOOGLE_DRIVE_AVAILABLE:
+            logger.warning("⚠️ Google Drive dependencies not available - upload skipped")
+            return False
+            
         if not self.service:
             logger.error("❌ Drive service not initialized")
             return False
@@ -81,7 +116,7 @@ class DriveSaver:
             return False
 
     def is_service_available(self) -> bool:
-        return self.service is not None
+        return GOOGLE_DRIVE_AVAILABLE and self.service is not None
 
     def set_folder_id(self, folder_id: str):
         self.folder_id = folder_id
