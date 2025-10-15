@@ -252,8 +252,11 @@ def validate_medical_accuracy(question: str, answer: str, paraphraser) -> bool:
         return False
     
     try:
-        # Use the existing consistency check but with medical focus
-        return paraphraser.consistency_check(question, answer)
+        # Use medical accuracy check if available (local mode), otherwise fallback to consistency check
+        if hasattr(paraphraser, 'medical_accuracy_check'):
+            return paraphraser.medical_accuracy_check(question, answer)
+        else:
+            return paraphraser.consistency_check(question, answer)
     except Exception as e:
         logger.warning(f"Medical accuracy validation failed: {e}")
         return True  # Default to accepting if validation fails
@@ -264,15 +267,21 @@ def enhance_medical_terminology(text: str, paraphraser) -> str:
         return text
     
     try:
-        prompt = (
-            "Improve the medical terminology in this text while preserving all factual information:\n\n"
-            f"{text}\n\n"
-            "Return only the improved text with better medical terminology:"
-        )
-        
-        enhanced = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=prompt)
-        if enhanced and not is_invalid_response(enhanced):
-            return enhanced
+        # Use dedicated method if available (local mode), otherwise use paraphrase with custom prompt
+        if hasattr(paraphraser, 'enhance_medical_terminology'):
+            enhanced = paraphraser.enhance_medical_terminology(text)
+            if enhanced and not is_invalid_response(enhanced):
+                return enhanced
+        else:
+            prompt = (
+                "Improve the medical terminology in this text while preserving all factual information:\n\n"
+                f"{text}\n\n"
+                "Return only the improved text with better medical terminology:"
+            )
+            
+            enhanced = paraphraser.paraphrase(text, difficulty="hard", custom_prompt=prompt)
+            if enhanced and not is_invalid_response(enhanced):
+                return enhanced
     except Exception as e:
         logger.warning(f"Medical terminology enhancement failed: {e}")
     
@@ -283,22 +292,26 @@ def create_clinical_scenarios(question: str, answer: str, paraphraser) -> list:
     scenarios = []
     
     try:
-        # Generate different clinical contexts
-        context_prompts = [
-            f"Rewrite this medical question as if asked by a patient in an emergency room:\n\n{question}",
-            f"Rewrite this medical question as if asked by a patient in a routine checkup:\n\n{question}",
-            f"Rewrite this medical question as if asked by a patient with chronic conditions:\n\n{question}",
-            f"Rewrite this medical question as if asked by a patient's family member:\n\n{question}"
-        ]
-        
-        for i, prompt in enumerate(context_prompts):
-            try:
-                scenario_question = paraphraser.paraphrase(question, difficulty="hard", custom_prompt=prompt)
-                if scenario_question and not is_invalid_response(scenario_question):
-                    scenarios.append((scenario_question, answer, f"clinical_scenario_{i+1}"))
-            except Exception as e:
-                logger.warning(f"Failed to create clinical scenario {i+1}: {e}")
-                continue
+        # Use dedicated method if available (local mode), otherwise use paraphrase with custom prompts
+        if hasattr(paraphraser, 'create_clinical_scenarios'):
+            scenarios = paraphraser.create_clinical_scenarios(question, answer)
+        else:
+            # Fallback to original implementation
+            context_prompts = [
+                f"Rewrite this medical question as if asked by a patient in an emergency room:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient in a routine checkup:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient with chronic conditions:\n\n{question}",
+                f"Rewrite this medical question as if asked by a patient's family member:\n\n{question}"
+            ]
+            
+            for i, prompt in enumerate(context_prompts):
+                try:
+                    scenario_question = paraphraser.paraphrase(question, difficulty="hard", custom_prompt=prompt)
+                    if scenario_question and not is_invalid_response(scenario_question):
+                        scenarios.append((scenario_question, answer, f"clinical_scenario_{i+1}"))
+                except Exception as e:
+                    logger.warning(f"Failed to create clinical scenario {i+1}: {e}")
+                    continue
                 
     except Exception as e:
         logger.warning(f"Clinical scenario creation failed: {e}")

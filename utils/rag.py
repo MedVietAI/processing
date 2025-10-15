@@ -7,6 +7,7 @@ from typing import Dict, List, Tuple, Optional, Callable
 
 from utils.schema import sft_row, rag_row
 from utils.cloud_llm import NvidiaClient, KeyRotator
+from utils.local_llm import MedAlpacaClient
 from vi.processing import should_translate, translate_rag_row
 from utils import augment as A
 
@@ -41,11 +42,17 @@ def _iter_json_or_jsonl(path: str):
 class RAGProcessor:
     """Processes medical datasets into RAG-specific QCA (Question, Context, Answer) format"""
     
-    def __init__(self, nvidia_model: str):
-        self.nvidia_client = NvidiaClient(KeyRotator("NVIDIA_API"), nvidia_model)
+    def __init__(self, nvidia_model: str, is_local: bool = False, hf_token: str = None):
+        self.is_local = is_local
+        if is_local:
+            self.medalpaca_client = MedAlpacaClient(hf_token=hf_token)
+            self.nvidia_client = None
+        else:
+            self.nvidia_client = NvidiaClient(KeyRotator("NVIDIA_API"), nvidia_model)
+            self.medalpaca_client = None
         
     def clean_conversational_content(self, text: str) -> str:
-        """Remove conversational elements and non-medical information using NVIDIA model; keep concise for embeddings."""
+        """Remove conversational elements and non-medical information using MedAlpaca or NVIDIA model; keep concise for embeddings."""
         if not text or len(text.strip()) < 10:
             return text
             
@@ -64,11 +71,18 @@ class RAGProcessor:
         Cleaned medical content:"""
 
         try:
-            cleaned = self.nvidia_client.generate(
-                prompt, 
-                temperature=0.1, 
-                max_tokens=min(1000, len(text) + 200)
-            )
+            if self.is_local and self.medalpaca_client:
+                cleaned = self.medalpaca_client.generate(
+                    prompt, 
+                    temperature=0.1, 
+                    max_tokens=min(1000, len(text) + 200)
+                )
+            else:
+                cleaned = self.nvidia_client.generate(
+                    prompt, 
+                    temperature=0.1, 
+                    max_tokens=min(1000, len(text) + 200)
+                )
             return cleaned.strip() if cleaned else text
         except Exception as e:
             logger.warning(f"[RAG] Error cleaning text: {e}")
@@ -88,11 +102,18 @@ class RAGProcessor:
         Generate a concise medical context:"""
 
         try:
-            context = self.nvidia_client.generate(
-                prompt,
-                temperature=0.2,
-                max_tokens=200
-            )
+            if self.is_local and self.medalpaca_client:
+                context = self.medalpaca_client.generate(
+                    prompt,
+                    temperature=0.2,
+                    max_tokens=200
+                )
+            else:
+                context = self.nvidia_client.generate(
+                    prompt,
+                    temperature=0.2,
+                    max_tokens=200
+                )
             # Trim to a single short paragraph
             return (context or "").strip().split("\n")[0][:600]
         except Exception as e:
@@ -330,7 +351,9 @@ def process_file_into_rag(
     seed: int,
     progress_cb: Optional[Callable[[float, str], None]],
     translator=None,
-    paraphraser=None
+    paraphraser=None,
+    is_local: bool = False,
+    hf_token: str = None
 ) -> Tuple[int, Dict]:
     """Main entry point for RAG processing"""
     random.seed(seed)
@@ -342,7 +365,7 @@ def process_file_into_rag(
     logger.info(f"[RAG] Begin RAG processing dataset={dataset_key} sample_limit={sample_limit}")
     
     # Initialize RAG processor
-    rag_processor = RAGProcessor(nvidia_model)
+    rag_processor = RAGProcessor(nvidia_model, is_local=is_local, hf_token=hf_token)
     dedupe_seen = set()
     
     key = dataset_key.lower()

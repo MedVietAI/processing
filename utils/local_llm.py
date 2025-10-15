@@ -94,16 +94,20 @@ class MedAlpacaClient:
                 max_length=2048
             ).to(self.device)
             
-            # Generate
+            # Generate with optimized parameters for MedAlpaca
             with torch.no_grad():
                 outputs = self.model.generate(
                     **inputs,
                     max_new_tokens=max_tokens,
                     temperature=temperature,
-                    do_sample=True,
+                    do_sample=True if temperature > 0 else False,
                     pad_token_id=self.tokenizer.eos_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,
-                    repetition_penalty=1.1
+                    repetition_penalty=1.1,
+                    top_p=0.9 if temperature > 0 else 1.0,
+                    top_k=50 if temperature > 0 else 0,
+                    num_beams=1 if temperature > 0 else 4,
+                    early_stopping=True
                 )
             
             # Decode output
@@ -123,28 +127,36 @@ class MedAlpacaClient:
             return None
     
     def _format_prompt(self, prompt: str) -> str:
-        """Format prompt for MedAlpaca model"""
-        # MedAlpaca uses a specific format for medical Q&A
+        """Format prompt for MedAlpaca model with medical-specific formatting"""
+        # MedAlpaca was trained on medical Q&A pairs, so we use its expected format
         if "Question:" in prompt and "Answer:" in prompt:
             return prompt
         elif "Context:" in prompt and "Question:" in prompt:
             return prompt
+        elif "You are a" in prompt or "medical" in prompt.lower():
+            # For medical instructions, use Alpaca format
+            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\n{prompt}\n\n### Response:"
         else:
-            # Simple medical Q&A format
-            return f"Question: {prompt}\n\nAnswer:"
+            # Default medical Q&A format for MedAlpaca
+            return f"Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.\n\n### Instruction:\nAnswer the following medical question accurately and professionally.\n\n### Input:\n{prompt}\n\n### Response:"
     
     def _clean_response(self, text: str) -> str:
-        """Clean generated response"""
+        """Clean generated response with medical-specific cleaning"""
         if not text:
             return text
             
-        # Remove common prefixes
+        # Remove common prefixes and Alpaca format artifacts
         prefixes_to_remove = [
             "Answer:",
             "The answer is:",
             "Based on the information provided:",
             "Here's the answer:",
             "Here is the answer:",
+            "### Response:",
+            "Response:",
+            "Below is an instruction",
+            "### Instruction:",
+            "Instruction:",
         ]
         
         text = text.strip()
@@ -152,7 +164,13 @@ class MedAlpacaClient:
             if text.startswith(prefix):
                 text = text[len(prefix):].strip()
                 break
-                
+        
+        # Remove any remaining Alpaca format artifacts
+        if "### Response:" in text:
+            text = text.split("### Response:")[-1].strip()
+        if "### Input:" in text:
+            text = text.split("### Input:")[0].strip()
+            
         return text
     
     def _snip(self, text: str, max_words: int = 12) -> str:
@@ -161,6 +179,61 @@ class MedAlpacaClient:
             return "∅"
         words = text.strip().split()
         return " ".join(words[:max_words]) + (" …" if len(words) > max_words else "")
+    
+    def generate_batch(self, prompts: list, max_tokens: int = 512, temperature: float = 0.2) -> list:
+        """Generate text for multiple prompts in batch for better efficiency"""
+        if not self.is_loaded:
+            self.load_model()
+            
+        if not prompts:
+            return []
+            
+        try:
+            # Format all prompts
+            formatted_prompts = [self._format_prompt(prompt) for prompt in prompts]
+            
+            # Tokenize all inputs
+            inputs = self.tokenizer(
+                formatted_prompts,
+                return_tensors="pt",
+                padding=True,
+                truncation=True,
+                max_length=2048
+            ).to(self.device)
+            
+            # Generate for all prompts
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    do_sample=True if temperature > 0 else False,
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id,
+                    repetition_penalty=1.1,
+                    top_p=0.9 if temperature > 0 else 1.0,
+                    top_k=50 if temperature > 0 else 0,
+                    num_beams=1 if temperature > 0 else 4,
+                    early_stopping=True
+                )
+            
+            # Decode all outputs
+            results = []
+            input_length = inputs['input_ids'].shape[1]
+            for i, output in enumerate(outputs):
+                generated_text = self.tokenizer.decode(
+                    output[input_length:],
+                    skip_special_tokens=True
+                ).strip()
+                cleaned_text = self._clean_response(generated_text)
+                results.append(cleaned_text)
+            
+            logger.info(f"[LOCAL_LLM] Generated batch of {len(prompts)} texts")
+            return results
+            
+        except Exception as e:
+            logger.error(f"[LOCAL_LLM] Batch generation failed: {e}")
+            return [None] * len(prompts)
     
     def unload_model(self):
         """Unload model to free memory"""
@@ -185,34 +258,56 @@ class LocalParaphraser:
         self.client = MedAlpacaClient(model_name, hf_token)
         
     def paraphrase(self, text: str, difficulty: str = "easy", custom_prompt: str = None) -> str:
-        """Paraphrase text using MedAlpaca"""
+        """Paraphrase text using MedAlpaca with medical-specific optimization"""
         if not text or len(text) < 12:
             return text
             
         if custom_prompt:
             prompt = custom_prompt
         else:
-            prompt = (
-                "Paraphrase the following medical text concisely, preserve meaning and clinical terms.\n"
-                "Do not fabricate or remove factual claims.\n" 
-                "Return ONLY the rewritten text, without any introduction, commentary.\n\n"
-                f"Original text: {text}"
-            )
+            # Medical-specific paraphrasing prompts based on difficulty
+            if difficulty == "easy":
+                prompt = (
+                    "You are a medical professional. Rewrite the following medical text using different words while preserving all medical facts, clinical terms, and meaning. Keep the same level of detail and accuracy.\n\n"
+                    f"Original medical text: {text}\n\n"
+                    "Rewritten medical text:"
+                )
+            else:  # hard difficulty
+                prompt = (
+                    "You are a medical expert. Rewrite the following medical text using more sophisticated medical language and different sentence structures while preserving all clinical facts, medical terminology, and diagnostic information. Maintain professional medical tone.\n\n"
+                    f"Original medical text: {text}\n\n"
+                    "Enhanced medical text:"
+                )
         
-        result = self.client.generate(prompt, max_tokens=min(600, max(128, len(text)//2)), temperature=0.1)
+        # Adjust temperature based on difficulty
+        temperature = 0.1 if difficulty == "easy" else 0.3
+        result = self.client.generate(prompt, max_tokens=min(600, max(128, len(text)//2)), temperature=temperature)
         return result if result else text
     
     def translate(self, text: str, target_lang: str = "vi") -> Optional[str]:
-        """Translate text using MedAlpaca"""
+        """Translate text using MedAlpaca with medical terminology preservation"""
         if not text:
             return text
             
-        prompt = f"Translate the following medical text to {target_lang}. Keep meaning exact, preserve medical terms:\n\n{text}"
+        # Medical-specific translation prompt
+        if target_lang == "vi":
+            prompt = (
+                "You are a medical translator. Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms.\n\n"
+                f"English medical text: {text}\n\n"
+                "Vietnamese medical translation:"
+            )
+        else:
+            prompt = (
+                f"You are a medical translator. Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
+                f"Original medical text: {text}\n\n"
+                f"{target_lang} medical translation:"
+            )
+        
         result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.0)
         return result.strip() if result else None
     
     def backtranslate(self, text: str, via_lang: str = "vi") -> Optional[str]:
-        """Backtranslate text using MedAlpaca"""
+        """Backtranslate text using MedAlpaca with medical accuracy"""
         if not text:
             return text
             
@@ -221,22 +316,132 @@ class LocalParaphraser:
         if not translated:
             return None
             
-        # Then translate back to English
-        prompt = f"Translate the following {via_lang} text back to English, preserving the exact meaning:\n\n{translated}"
+        # Then translate back to English with medical focus
+        if via_lang == "vi":
+            prompt = (
+                "You are a medical translator. Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate.\n\n"
+                f"Vietnamese medical text: {translated}\n\n"
+                "English medical translation:"
+            )
+        else:
+            prompt = (
+                f"You are a medical translator. Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language.\n\n"
+                f"{via_lang} medical text: {translated}\n\n"
+                "English medical translation:"
+            )
+        
         result = self.client.generate(prompt, max_tokens=min(900, len(text)+150), temperature=0.0)
         return result.strip() if result else None
     
     def consistency_check(self, user: str, output: str) -> bool:
-        """Check consistency using MedAlpaca"""
+        """Check consistency using MedAlpaca with medical validation focus"""
         prompt = (
-            "You are a strict medical QA validator. Given the USER input (question+context) "
-            "and the MODEL ANSWER, reply with exactly 'PASS' if the answer is supported and safe, "
-            "otherwise 'FAIL'. No extra text.\n\n"
-            f"USER:\n{user}\n\nANSWER:\n{output}"
+            "You are a medical quality assurance expert. Evaluate if the medical answer is consistent with the question/context and medically accurate. Consider:\n"
+            "1. Medical accuracy and clinical appropriateness\n"
+            "2. Consistency with the question asked\n"
+            "3. Safety and professional medical standards\n"
+            "4. Completeness of the medical information\n\n"
+            "Reply with exactly 'PASS' if the answer is medically sound and consistent, otherwise 'FAIL'.\n\n"
+            f"Question/Context: {user}\n\n"
+            f"Medical Answer: {output}\n\n"
+            "Evaluation:"
         )
         
-        result = self.client.generate(prompt, max_tokens=3, temperature=0.0)
+        result = self.client.generate(prompt, max_tokens=5, temperature=0.0)
         return isinstance(result, str) and "PASS" in result.upper()
+    
+    def medical_accuracy_check(self, question: str, answer: str) -> bool:
+        """Check medical accuracy of Q&A pairs using MedAlpaca"""
+        if not question or not answer:
+            return False
+            
+        prompt = (
+            "You are a medical accuracy validator. Evaluate if the medical answer is accurate and appropriate for the question. Consider:\n"
+            "1. Medical facts and clinical knowledge\n"
+            "2. Appropriate medical terminology\n"
+            "3. Clinical reasoning and logic\n"
+            "4. Safety considerations\n\n"
+            "Reply with exactly 'ACCURATE' if the answer is medically correct, otherwise 'INACCURATE'.\n\n"
+            f"Medical Question: {question}\n\n"
+            f"Medical Answer: {answer}\n\n"
+            "Medical Accuracy Assessment:"
+        )
+        
+        result = self.client.generate(prompt, max_tokens=5, temperature=0.0)
+        return isinstance(result, str) and "ACCURATE" in result.upper()
+    
+    def enhance_medical_terminology(self, text: str) -> str:
+        """Enhance medical terminology in text using MedAlpaca"""
+        if not text or len(text) < 20:
+            return text
+            
+        prompt = (
+            "You are a medical terminology expert. Improve the medical terminology in the following text while preserving all factual information and clinical accuracy. Use more precise medical terms where appropriate.\n\n"
+            f"Original text: {text}\n\n"
+            "Enhanced medical text:"
+        )
+        
+        result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.1)
+        return result if result else text
+    
+    def create_clinical_scenarios(self, question: str, answer: str) -> list:
+        """Create different clinical scenarios from Q&A pairs using MedAlpaca"""
+        scenarios = []
+        
+        # Different clinical context prompts
+        context_prompts = [
+            (
+                "Rewrite this medical question as if asked by a patient in an emergency room setting:",
+                "emergency_room"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient during a routine checkup:",
+                "routine_checkup"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient with chronic conditions:",
+                "chronic_care"
+            ),
+            (
+                "Rewrite this medical question as if asked by a patient's family member:",
+                "family_inquiry"
+            )
+        ]
+        
+        for prompt_template, scenario_type in context_prompts:
+            try:
+                prompt = f"{prompt_template}\n\nOriginal question: {question}\n\nRewritten question:"
+                scenario_question = self.client.generate(prompt, max_tokens=min(400, len(question)+50), temperature=0.2)
+                
+                if scenario_question and not self._is_invalid_response(scenario_question):
+                    scenarios.append((scenario_question, answer, scenario_type))
+            except Exception as e:
+                logger.warning(f"Failed to create clinical scenario {scenario_type}: {e}")
+                continue
+                
+        return scenarios
+    
+    def _is_invalid_response(self, text: str) -> bool:
+        """Check if response is invalid (similar to augment.py)"""
+        if not text or not isinstance(text, str):
+            return True
+        
+        text_lower = text.lower().strip()
+        invalid_patterns = [
+            "fail", "invalid", "i couldn't", "i can't", "i cannot", "unable to",
+            "sorry", "error", "not available", "no answer", "insufficient",
+            "don't know", "do not know", "not sure", "cannot determine",
+            "unable to provide", "not possible", "not applicable", "n/a"
+        ]
+        
+        if len(text_lower) < 3:
+            return True
+        
+        for pattern in invalid_patterns:
+            if pattern in text_lower:
+                return True
+        
+        return False
     
     def unload(self):
         """Unload the model"""

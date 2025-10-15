@@ -456,7 +456,9 @@ def _run_job(dataset_key: str, params: ProcessParams):
                 seed=params.seed,
                 progress_cb=lambda p, msg=None: set_state(progress=p, message=msg or STATE["message"]),
                 translator=translator,
-                paraphraser=paraphraser
+                paraphraser=paraphraser,
+                is_local=IS_LOCAL,
+                hf_token=os.getenv("HF_TOKEN")
             )
         else:
             # Standard SFT processing mode
