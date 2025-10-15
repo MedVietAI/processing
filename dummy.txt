@@ -1,7 +1,6 @@
-At line:1 char:33
-+ docker create --name temp-medai <YOUR_IMAGE_ID_OR_TAG>
-+                                 ~
-The '<' operator is reserved for future use.
-    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordExce  
-   ption
-    + FullyQualifiedErrorId : RedirectionNotSupported
+# If your image shows as: medai-processing:local
+docker create --name temp-medai medai-processing:local
+docker cp utils/drive_saver.py temp-medai:/app/utils/drive_saver.py
+docker commit temp-medai medai-processing:patched
+docker rm temp-medai
+docker run -d --name medai-processing -p 8000:8000 medai-processing:patched
