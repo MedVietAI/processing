@@ -1,9 +1,49 @@
 # GCS credential token refresher
 import os, json, logging
 from typing import Optional
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import Flow
-from google.auth.transport.requests import Request
+
+# Dynamic imports for Google OAuth (only when not in local mode)
+def _import_google_oauth():
+    """Dynamically import Google OAuth libraries only when needed"""
+    try:
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import Flow
+        from google.auth.transport.requests import Request
+        return Credentials, Flow, Request
+    except ImportError as e:
+        raise ImportError(f"Google OAuth libraries not available: {e}. Make sure IS_LOCAL=false and google-auth packages are installed.")
+
+# Check if we're in local mode
+IS_LOCAL = os.getenv("IS_LOCAL", "false").lower() == "true"
+
+# Only import Google OAuth libraries if not in local mode
+if not IS_LOCAL:
+    try:
+        Credentials, Flow, Request = _import_google_oauth()
+    except ImportError:
+        # Create dummy classes for when Google OAuth is not available
+        class Credentials:
+            @staticmethod
+            def from_authorized_user_info(*args, **kwargs):
+                raise ImportError("Google OAuth not available")
+        class Flow:
+            @staticmethod
+            def from_client_config(*args, **kwargs):
+                raise ImportError("Google OAuth not available")
+        class Request:
+            pass
+else:
+    # Create dummy classes for local mode
+    class Credentials:
+        @staticmethod
+        def from_authorized_user_info(*args, **kwargs):
+            raise ImportError("Google OAuth not available in local mode")
+    class Flow:
+        @staticmethod
+        def from_client_config(*args, **kwargs):
+            raise ImportError("Google OAuth not available in local mode")
+    class Request:
+        pass
 
 logger = logging.getLogger("token")
 if not logger.handlers:
@@ -31,6 +71,10 @@ def _ensure_dirs():
         os.makedirs(base, exist_ok=True)
 
 def get_credentials() -> Optional[Credentials]:
+    if IS_LOCAL:
+        logger.info("🏠 Local mode: Google OAuth credentials not needed")
+        return None
+        
     # 1) Token file
     if os.path.exists(TOKEN_FILE):
         try:
@@ -68,6 +112,9 @@ def get_credentials() -> Optional[Credentials]:
     return None
 
 def build_auth_url(redirect_uri: str) -> str:
+    if IS_LOCAL:
+        raise RuntimeError("Google OAuth not available in local mode")
+        
     web = _load_oauth_client_web()
     if not web:
         raise RuntimeError("GDRIVE_CREDENTIALS_JSON missing or invalid ('web' section required)")
@@ -80,6 +127,9 @@ def build_auth_url(redirect_uri: str) -> str:
     return auth_url
 
 def exchange_code(code: str, redirect_uri: str) -> Credentials:
+    if IS_LOCAL:
+        raise RuntimeError("Google OAuth not available in local mode")
+        
     web = _load_oauth_client_web()
     if not web:
         raise RuntimeError("GDRIVE_CREDENTIALS_JSON missing or invalid ('web' section required)")

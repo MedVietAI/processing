@@ -2,29 +2,51 @@
 import os, json, logging
 from typing import Optional
 
-# Conditional imports for Google Drive (only when needed)
-try:
-    from google.oauth2 import service_account
-    from googleapiclient.discovery import build
-    from googleapiclient.http import MediaFileUpload
-    GOOGLE_DRIVE_AVAILABLE = True
-except ImportError:
+# Check if we're in local mode
+IS_LOCAL = os.getenv("IS_LOCAL", "false").lower() == "true"
+
+# Conditional imports for Google Drive (only when not in local mode)
+if not IS_LOCAL:
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        from googleapiclient.http import MediaFileUpload
+        GOOGLE_DRIVE_AVAILABLE = True
+    except ImportError:
+        GOOGLE_DRIVE_AVAILABLE = False
+        # Create dummy classes for when Google Drive is not available
+        class service_account:
+            class Credentials:
+                @staticmethod
+                def from_service_account_info(*args, **kwargs):
+                    raise ImportError("Google Drive dependencies not available")
+        
+        class build:
+            @staticmethod
+            def build(*args, **kwargs):
+                raise ImportError("Google Drive dependencies not available")
+        
+        class MediaFileUpload:
+            def __init__(self, *args, **kwargs):
+                raise ImportError("Google Drive dependencies not available")
+else:
+    # Local mode: Google Drive is not available
     GOOGLE_DRIVE_AVAILABLE = False
-    # Create dummy classes for when Google Drive is not available
+    # Create dummy classes for local mode
     class service_account:
         class Credentials:
             @staticmethod
             def from_service_account_info(*args, **kwargs):
-                raise ImportError("Google Drive dependencies not available")
+                raise ImportError("Google Drive not available in local mode")
     
     class build:
         @staticmethod
         def build(*args, **kwargs):
-            raise ImportError("Google Drive dependencies not available")
+            raise ImportError("Google Drive not available in local mode")
     
     class MediaFileUpload:
         def __init__(self, *args, **kwargs):
-            raise ImportError("Google Drive dependencies not available")
+            raise ImportError("Google Drive not available in local mode")
 
 from utils.token import get_credentials
 
@@ -45,6 +67,11 @@ class DriveSaver:
         self.supports_all_drives = os.getenv("GDRIVE_FOLDER_IS_SHARED", "false").lower() in ("1","true","yes")
         self.allow_sa_fallback = os.getenv("GDRIVE_ALLOW_SA_FALLBACK", "false").lower() in ("1","true","yes")
         
+        # Check if we're in local mode
+        if IS_LOCAL:
+            logger.info("🏠 Local mode: Google Drive integration disabled")
+            return
+            
         # Check if Google Drive is available
         if not GOOGLE_DRIVE_AVAILABLE:
             logger.warning("⚠️ Google Drive dependencies not available - DriveSaver will be disabled")
@@ -55,6 +82,10 @@ class DriveSaver:
         self._initialize_service()
 
     def _initialize_service(self):
+        if IS_LOCAL:
+            logger.info("🏠 Local mode: Skipping Google Drive service initialization")
+            return
+            
         if not GOOGLE_DRIVE_AVAILABLE:
             logger.warning("⚠️ Google Drive dependencies not available - skipping service initialization")
             return
@@ -90,6 +121,10 @@ class DriveSaver:
         logger.info("✅ Google Drive service initialized")
 
     def upload_file_to_drive(self, file_path: str, folder_id: Optional[str] = None, mimetype: Optional[str] = None) -> bool:
+        if IS_LOCAL:
+            logger.info("🏠 Local mode: File upload to Google Drive skipped")
+            return False
+            
         if not GOOGLE_DRIVE_AVAILABLE:
             logger.warning("⚠️ Google Drive dependencies not available - upload skipped")
             return False
@@ -116,7 +151,7 @@ class DriveSaver:
             return False
 
     def is_service_available(self) -> bool:
-        return GOOGLE_DRIVE_AVAILABLE and self.service is not None
+        return not IS_LOCAL and GOOGLE_DRIVE_AVAILABLE and self.service is not None
 
     def set_folder_id(self, folder_id: str):
         self.folder_id = folder_id

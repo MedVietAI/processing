@@ -3,7 +3,27 @@ import os
 import logging
 import requests
 from typing import Optional
-from google import genai
+
+# Dynamic import for Google GenAI (only when not in local mode)
+def _import_google_genai():
+    """Dynamically import Google GenAI only when needed"""
+    try:
+        from google import genai
+        return genai
+    except ImportError as e:
+        raise ImportError(f"Google GenAI not available: {e}. Make sure IS_LOCAL=false and google-genai is installed.")
+
+# Check if we're in local mode
+IS_LOCAL = os.getenv("IS_LOCAL", "false").lower() == "true"
+
+# Only import Google GenAI if not in local mode
+if not IS_LOCAL:
+    try:
+        genai = _import_google_genai()
+    except ImportError:
+        genai = None
+else:
+    genai = None
 
 logger = logging.getLogger("llm")
 if not logger.handlers:
@@ -49,8 +69,13 @@ class GeminiClient:
     def __init__(self, rotator: KeyRotator, default_model: str):
         self.rotator = rotator
         self.default_model = default_model
+        self.available = genai is not None and not IS_LOCAL
 
     def generate(self, prompt: str, model: Optional[str] = None, temperature: float = 0.2, max_output_tokens: int = 512) -> Optional[str]:
+        if not self.available:
+            logger.warning("[LLM][Gemini] Google GenAI not available (local mode or import failed)")
+            return None
+            
         key = self.rotator.next_key()
         if not key:
             return None
