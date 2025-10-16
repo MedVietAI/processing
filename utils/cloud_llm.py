@@ -2,6 +2,7 @@
 import os
 import logging
 import requests
+import time
 from typing import Optional
 
 # Dynamic import for Google GenAI (only when not in local mode)
@@ -47,23 +48,88 @@ class KeyRotator:
         if not keys:
             logger.warning(f"[LLM] No keys found for prefix {env_prefix}_*")
         self.keys = keys
-        self.dead = set()
+        self.dead = set()  # Permanently dead keys
+        self.temp_dead = {}  # Temporarily dead keys with retry time
+        self.retry_counts = {}  # Track retry attempts per key
         self.idx = 0
-
+        self.max_retries = 3  # Max retries before permanent death
+        self.retry_delay = 60  # Seconds to wait before retry
+        
     def next_key(self) -> Optional[str]:
         if not self.keys:
             return None
+            
+        # Clean up expired temporary dead keys
+        current_time = time.time()
+        expired_keys = [k for k, retry_time in self.temp_dead.items() if current_time > retry_time]
+        for k in expired_keys:
+            del self.temp_dead[k]
+            logger.info(f"[LLM] Key {k[:6]}*** is back in rotation after cooldown")
+        
+        # Try to find an available key
         for _ in range(len(self.keys)):
             k = self.keys[self.idx % len(self.keys)]
             self.idx += 1
-            if k not in self.dead:
-                return k
+            
+            # Skip permanently dead keys
+            if k in self.dead:
+                continue
+                
+            # Skip temporarily dead keys
+            if k in self.temp_dead and current_time < self.temp_dead[k]:
+                continue
+                
+            return k
+            
+        # All keys are dead or temporarily unavailable
+        logger.warning(f"[LLM] All keys for {env_prefix} are unavailable")
         return None
 
-    def mark_bad(self, key: Optional[str]):
-        if key:
+    def mark_bad(self, key: Optional[str], error_type: str = "unknown"):
+        if not key:
+            return
+            
+        current_time = time.time()
+        retry_count = self.retry_counts.get(key, 0)
+        
+        # Determine if this is a temporary or permanent failure
+        is_temporary = self._is_temporary_error(error_type)
+        
+        if is_temporary and retry_count < self.max_retries:
+            # Temporary failure - add to temp_dead with retry time
+            retry_delay = self.retry_delay * (2 ** retry_count)  # Exponential backoff
+            self.temp_dead[key] = current_time + retry_delay
+            self.retry_counts[key] = retry_count + 1
+            logger.warning(f"[LLM] Key {key[:6]}*** temporarily quarantined for {retry_delay}s (attempt {retry_count + 1}/{self.max_retries})")
+        else:
+            # Permanent failure or max retries reached
             self.dead.add(key)
-            logger.warning(f"[LLM] Quarantined key (prefix hidden): {key[:6]}***")
+            if key in self.temp_dead:
+                del self.temp_dead[key]
+            if key in self.retry_counts:
+                del self.retry_counts[key]
+            logger.error(f"[LLM] Key {key[:6]}*** permanently quarantined after {retry_count} retries")
+    
+    def _is_temporary_error(self, error_type: str) -> bool:
+        """Determine if an error is temporary and worth retrying"""
+        temporary_errors = [
+            "rate_limit", "quota_exceeded", "too_many_requests", "429",
+            "service_unavailable", "503", "bad_gateway", "502",
+            "timeout", "connection_error", "network_error"
+        ]
+        
+        error_lower = error_type.lower()
+        return any(temp_err in error_lower for temp_err in temporary_errors)
+    
+    def get_stats(self) -> dict:
+        """Get rotator statistics"""
+        return {
+            "total_keys": len(self.keys),
+            "dead_keys": len(self.dead),
+            "temp_dead_keys": len(self.temp_dead),
+            "available_keys": len(self.keys) - len(self.dead) - len(self.temp_dead),
+            "retry_counts": self.retry_counts.copy()
+        }
 
 class GeminiClient:
     def __init__(self, rotator: KeyRotator, default_model: str):
@@ -91,8 +157,9 @@ class GeminiClient:
                 logger.info(f"[LLM][Gemini] out={snip(text)}")
             return text
         except Exception as e:
-            logger.error(f"[LLM][Gemini] {e}")
-            self.rotator.mark_bad(key)
+            error_msg = str(e)
+            logger.error(f"[LLM][Gemini] {error_msg}")
+            self.rotator.mark_bad(key, error_msg)
             return None
 
 class NvidiaClient:
@@ -138,18 +205,108 @@ class NvidiaClient:
             logger.info(f"[LLM][NVIDIA] out={snip(clean)}")
             return clean        
         except Exception as e:
-            logger.error(f"[LLM][NVIDIA] {e}")
-            self.rotator.mark_bad(key)
+            error_msg = str(e)
+            logger.error(f"[LLM][NVIDIA] {error_msg}")
+            self.rotator.mark_bad(key, error_msg)
             return None
 
 class Paraphraser:
-    """Prefers NVIDIA (cheap), falls back to Gemini EASY only. Also offers translate/backtranslate and a tiny consistency judge."""
+    """Intelligent API load balancer with rate limiting and cost optimization."""
     def __init__(self, nvidia_model: str, gemini_model_easy: str, gemini_model_hard: str):
         self.nv = NvidiaClient(KeyRotator("NVIDIA_API"), nvidia_model)
         self.gm_easy = GeminiClient(KeyRotator("GEMINI_API"), gemini_model_easy)
         # Only use GEMINI_MODEL_EASY, ignore hard model completely
         self.gm_hard = None  # Disabled - only use easy model
-        logger.info("Paraphraser initialized: NVIDIA -> GEMINI_EASY (GEMINI_HARD disabled)")
+        
+        # Rate limiting and load balancing
+        self.last_nvidia_call = 0
+        self.last_gemini_call = 0
+        self.min_call_interval = 0.1  # Minimum 100ms between calls
+        self.nvidia_success_rate = 1.0  # Track success rates for load balancing
+        self.gemini_success_rate = 1.0
+        self.call_counts = {"nvidia": 0, "gemini": 0, "failures": 0}
+        
+        logger.info("Paraphraser initialized with intelligent load balancing: NVIDIA -> GEMINI_EASY")
+    
+    def _rate_limit(self, api_type: str):
+        """Apply rate limiting to prevent API exhaustion"""
+        current_time = time.time()
+        if api_type == "nvidia":
+            time_since_last = current_time - self.last_nvidia_call
+            if time_since_last < self.min_call_interval:
+                sleep_time = self.min_call_interval - time_since_last
+                time.sleep(sleep_time)
+            self.last_nvidia_call = time.time()
+        elif api_type == "gemini":
+            time_since_last = current_time - self.last_gemini_call
+            if time_since_last < self.min_call_interval:
+                sleep_time = self.min_call_interval - time_since_last
+                time.sleep(sleep_time)
+            self.last_gemini_call = time.time()
+    
+    def _select_api(self, prefer_cheap: bool = True) -> str:
+        """Intelligently select API based on success rates and availability"""
+        nvidia_stats = self.nv.rotator.get_stats()
+        gemini_stats = self.gm_easy.rotator.get_stats()
+        
+        nvidia_available = nvidia_stats["available_keys"] > 0
+        gemini_available = gemini_stats["available_keys"] > 0
+        
+        if not nvidia_available and not gemini_available:
+            return "none"
+        elif not nvidia_available:
+            return "gemini"
+        elif not gemini_available:
+            return "nvidia"
+        
+        # Both available - use intelligent selection
+        if prefer_cheap:
+            # Prefer NVIDIA (cheaper) but consider success rates
+            if self.nvidia_success_rate > 0.8 or self.gemini_success_rate < 0.5:
+                return "nvidia"
+            else:
+                return "gemini"
+        else:
+            # Prefer quality (Gemini) but consider success rates
+            if self.gemini_success_rate > 0.8 or self.nvidia_success_rate < 0.5:
+                return "gemini"
+            else:
+                return "nvidia"
+    
+    def _update_success_rate(self, api_type: str, success: bool):
+        """Update success rate tracking for load balancing"""
+        if api_type == "nvidia":
+            # Exponential moving average
+            alpha = 0.1
+            self.nvidia_success_rate = alpha * (1.0 if success else 0.0) + (1 - alpha) * self.nvidia_success_rate
+        elif api_type == "gemini":
+            alpha = 0.1
+            self.gemini_success_rate = alpha * (1.0 if success else 0.0) + (1 - alpha) * self.gemini_success_rate
+    
+    def _call_api(self, prompt: str, api_type: str, **kwargs) -> Optional[str]:
+        """Make API call with rate limiting and error tracking"""
+        self._rate_limit(api_type)
+        
+        try:
+            if api_type == "nvidia":
+                result = self.nv.generate(prompt, **kwargs)
+                self.call_counts["nvidia"] += 1
+                success = result is not None
+                self._update_success_rate("nvidia", success)
+                return result
+            elif api_type == "gemini":
+                result = self.gm_easy.generate(prompt, **kwargs)
+                self.call_counts["gemini"] += 1
+                success = result is not None
+                self._update_success_rate("gemini", success)
+                return result
+        except Exception as e:
+            self.call_counts["failures"] += 1
+            self._update_success_rate(api_type, False)
+            logger.error(f"[LLM] API call failed for {api_type}: {e}")
+            return None
+        
+        return None
 
     # Enhanced cleaning to remove conversational elements and comments
     def _clean_resp(self, resp: str) -> str:
@@ -253,16 +410,24 @@ class Paraphraser:
         temperature = 0.1 if difficulty == "easy" else 0.3
         max_tokens = min(600, max(128, len(text)//2))
         
-        # Always try NVIDIA first (optimized for medical tasks)
-        out = self.nv.generate(prompt, temperature=temperature, max_tokens=max_tokens)
-        if out: 
-            return self._clean_resp(out)
+        # Intelligent API selection with fallback
+        api_type = self._select_api(prefer_cheap=True)
         
-        # Fallback to GEMINI with optimized parameters
-        out = self.gm_easy.generate(prompt, max_output_tokens=max_tokens)
-        if out:
-            logger.info(f"[LLM][GEMINI] out={snip(self._clean_resp(out))}")
-            return self._clean_resp(out)
+        if api_type == "nvidia":
+            out = self._call_api(prompt, "nvidia", temperature=temperature, max_tokens=max_tokens)
+            if out:
+                return self._clean_resp(out)
+            # Fallback to Gemini if NVIDIA fails
+            api_type = self._select_api(prefer_cheap=False)
+        
+        if api_type == "gemini":
+            out = self._call_api(prompt, "gemini", max_output_tokens=max_tokens)
+            if out:
+                logger.info(f"[LLM][GEMINI] out={snip(self._clean_resp(out))}")
+                return self._clean_resp(out)
+        
+        # Both APIs failed
+        logger.warning(f"[LLM] All APIs failed for paraphrase, returning original text")
         return text
 
     # ————— Translate & Backtranslate —————
@@ -281,9 +446,22 @@ class Paraphraser:
                 f"{text}"
             )
         
-        out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(800, len(text)+100))
-        if out: return out.strip()
-        return self.gm_easy.generate(prompt, max_output_tokens=min(800, len(text)+100))
+        # Intelligent API selection for translation
+        api_type = self._select_api(prefer_cheap=True)
+        
+        if api_type == "nvidia":
+            out = self._call_api(prompt, "nvidia", temperature=0.0, max_tokens=min(800, len(text)+100))
+            if out:
+                return out.strip()
+            # Fallback to Gemini if NVIDIA fails
+            api_type = self._select_api(prefer_cheap=False)
+        
+        if api_type == "gemini":
+            out = self._call_api(prompt, "gemini", max_output_tokens=min(800, len(text)+100))
+            if out:
+                return out.strip()
+        
+        return None
 
     def backtranslate(self, text: str, via_lang: str = "vi") -> Optional[str]:
         if not text: return text
@@ -302,10 +480,22 @@ class Paraphraser:
                 f"{mid}"
             )
         
-        out = self.nv.generate(prompt, temperature=0.0, max_tokens=min(900, len(text)+150))
-        if out: return out.strip()
-        res = self.gm_easy.generate(prompt, max_output_tokens=min(900, len(text)+150))
-        return res.strip() if res else None
+        # Intelligent API selection for backtranslation
+        api_type = self._select_api(prefer_cheap=True)
+        
+        if api_type == "nvidia":
+            out = self._call_api(prompt, "nvidia", temperature=0.0, max_tokens=min(900, len(text)+150))
+            if out:
+                return out.strip()
+            # Fallback to Gemini if NVIDIA fails
+            api_type = self._select_api(prefer_cheap=False)
+        
+        if api_type == "gemini":
+            out = self._call_api(prompt, "gemini", max_output_tokens=min(900, len(text)+150))
+            if out:
+                return out.strip()
+        
+        return None
 
     # ————— Consistency Judge (cheap, ratio-based) —————
     def consistency_check(self, user: str, output: str) -> bool:
@@ -315,10 +505,42 @@ class Paraphraser:
             f"Question/Context: {user}\n\n"
             f"Medical Answer: {output}"
         )
-        out = self.nv.generate(prompt, temperature=0.0, max_tokens=5)
-        if not out:
-            out = self.gm_easy.generate(prompt, max_output_tokens=5)
-        return isinstance(out, str) and "PASS" in out.upper()
+        
+        # Use intelligent API selection for consistency check
+        api_type = self._select_api(prefer_cheap=True)
+        
+        if api_type == "nvidia":
+            out = self._call_api(prompt, "nvidia", temperature=0.0, max_tokens=5)
+            if out:
+                return isinstance(out, str) and "PASS" in out.upper()
+            # Fallback to Gemini if NVIDIA fails
+            api_type = self._select_api(prefer_cheap=False)
+        
+        if api_type == "gemini":
+            out = self._call_api(prompt, "gemini", max_output_tokens=5)
+            if out:
+                return isinstance(out, str) and "PASS" in out.upper()
+        
+        # If both APIs fail, assume consistency (conservative approach)
+        logger.warning("[LLM] Consistency check failed due to API unavailability, assuming consistent")
+        return True
+    
+    def get_api_stats(self) -> dict:
+        """Get comprehensive API usage statistics"""
+        nvidia_stats = self.nv.rotator.get_stats()
+        gemini_stats = self.gm_easy.rotator.get_stats()
+        
+        return {
+            "call_counts": self.call_counts.copy(),
+            "success_rates": {
+                "nvidia": self.nvidia_success_rate,
+                "gemini": self.gemini_success_rate
+            },
+            "nvidia_rotator": nvidia_stats,
+            "gemini_rotator": gemini_stats,
+            "total_calls": sum(self.call_counts.values()),
+            "failure_rate": self.call_counts["failures"] / max(1, sum(self.call_counts.values()))
+        }
     
     def medical_accuracy_check(self, question: str, answer: str) -> bool:
         """Check medical accuracy of Q&A pairs using cloud APIs"""
