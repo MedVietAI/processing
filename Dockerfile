@@ -28,7 +28,7 @@ RUN pip install --upgrade pip && \
 # Copy the application
 COPY --chown=user . .
 
-# Download Vietnamese translation model
+# Download Vietnamese translation model (always needed for fallback)
 RUN python vi/download.py
 
 # Hugging Face cache setup
@@ -40,10 +40,14 @@ ENV MEDGEMMA_HOME="$HOME/.cache/huggingface/sentence-transformers"
 RUN mkdir -p $HOME/app/logs $HOME/app/cache $HOME/app/cache/hf $HOME/app/cache/outputs $HOME/app/data && \
     chown -R user:user $HOME/app
 
-# Download MedAlpaca model if in local mode
+# Download models based on mode
 RUN if [ "$IS_LOCAL" = "true" ]; then \
-        echo "Downloading MedAlpaca-13b model for local mode..."; \
+        echo "Downloading models for local mode..."; \
+        echo "Downloading MedAlpaca-13b model..."; \
         python -c "from huggingface_hub import snapshot_download; import os; snapshot_download('medalpaca/medalpaca-13b', token=os.getenv('HF_TOKEN'), cache_dir='$HOME/.cache/huggingface')"; \
+        echo "Vietnamese translation model already downloaded above"; \
+    else \
+        echo "Cloud mode: Only Vietnamese translation model downloaded"; \
     fi
 
 USER user

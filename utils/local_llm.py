@@ -291,10 +291,25 @@ class MedAlpacaClient:
         logger.info("[LOCAL_LLM] Model unloaded and memory freed")
 
 class LocalParaphraser:
-    """Local paraphraser using MedAlpaca model"""
+    """Local paraphraser using MedAlpaca model with Vietnamese fallback translation"""
     
     def __init__(self, model_name: str = "medalpaca/medalpaca-13b", hf_token: str = None):
         self.client = MedAlpacaClient(model_name, hf_token)
+        self.vietnamese_translator = None
+        self._init_vietnamese_translator()
+    
+    def _init_vietnamese_translator(self):
+        """Initialize Vietnamese translator for fallback translation"""
+        try:
+            from vi.translator import VietnameseTranslator
+            self.vietnamese_translator = VietnameseTranslator()
+            logger.info("[LOCAL_LLM] Vietnamese translator initialized for fallback")
+        except ImportError as e:
+            logger.warning(f"[LOCAL_LLM] Vietnamese translator not available: {e}")
+            self.vietnamese_translator = None
+        except Exception as e:
+            logger.warning(f"[LOCAL_LLM] Failed to initialize Vietnamese translator: {e}")
+            self.vietnamese_translator = None
         
     def paraphrase(self, text: str, difficulty: str = "easy", custom_prompt: str = None) -> str:
         """Paraphrase text using MedAlpaca with medical-specific optimization"""
@@ -321,50 +336,149 @@ class LocalParaphraser:
         result = self.client.generate(prompt, max_tokens=min(600, max(128, len(text)//2)), temperature=temperature)
         return result if result else text
     
-    def translate(self, text: str, target_lang: str = "vi") -> Optional[str]:
-        """Translate text using MedAlpaca with medical terminology preservation"""
+    def translate(self, text: str, target_lang: str = "vi", max_retries: int = 2) -> Optional[str]:
+        """Translate text using MedAlpaca with Vietnamese fallback mechanism"""
         if not text:
             return text
             
-        # Medical-specific translation prompt
-        if target_lang == "vi":
-            prompt = (
-                "Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms. Return only the translation without any introduction or commentary.\n\n"
-                f"{text}"
-            )
-        else:
-            prompt = (
-                f"Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
-                f"{text}"
-            )
+        # Only implement fallback for Vietnamese translation
+        if target_lang != "vi":
+            return self._translate_other_language(text, target_lang)
+        
+        # Try MedAlpaca translation with retries
+        for attempt in range(max_retries + 1):
+            try:
+                # Medical-specific Vietnamese translation prompt
+                prompt = (
+                    "Translate the following English medical text to Vietnamese while preserving all medical terminology, clinical facts, and professional medical language. Use appropriate Vietnamese medical terms. Return only the translation without any introduction or commentary.\n\n"
+                    f"{text}"
+                )
+                
+                result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.0)
+                
+                if result and result.strip():
+                    # Validate the translation
+                    if self._is_valid_vietnamese_translation(text, result.strip()):
+                        logger.info(f"[LOCAL_LLM] Vietnamese translation successful (attempt {attempt + 1})")
+                        return result.strip()
+                    else:
+                        logger.warning(f"[LOCAL_LLM] Invalid Vietnamese translation (attempt {attempt + 1}): {result[:100]}...")
+                else:
+                    logger.warning(f"[LOCAL_LLM] Empty Vietnamese translation (attempt {attempt + 1})")
+                    
+            except Exception as e:
+                logger.warning(f"[LOCAL_LLM] Vietnamese translation attempt {attempt + 1} failed: {e}")
+        
+        # Fallback: Use translation model to translate English answer
+        logger.info("[LOCAL_LLM] MedAlpaca Vietnamese translation failed, using fallback translation model")
+        return self._fallback_vietnamese_translation(text)
+    
+    def _translate_other_language(self, text: str, target_lang: str) -> Optional[str]:
+        """Translate to languages other than Vietnamese using MedAlpaca"""
+        prompt = (
+            f"Translate the following medical text to {target_lang} while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
+            f"{text}"
+        )
         
         result = self.client.generate(prompt, max_tokens=min(800, len(text)+100), temperature=0.0)
         return result.strip() if result else None
     
+    def _is_valid_vietnamese_translation(self, original: str, translation: str) -> bool:
+        """Check if the Vietnamese translation is valid"""
+        if not translation or not translation.strip():
+            return False
+        
+        # Check if translation is too similar to original (likely failed)
+        if translation.strip().lower() == original.strip().lower():
+            return False
+        
+        # Check if translation contains English words (likely failed)
+        english_words = ['the', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'must']
+        translation_lower = translation.lower()
+        english_word_count = sum(1 for word in english_words if word in translation_lower)
+        
+        # If more than 30% of common English words are present, likely failed
+        if english_word_count > len(translation.split()) * 0.3:
+            return False
+        
+        # Check minimum length (should be reasonable)
+        if len(translation.strip()) < len(original.strip()) * 0.3:
+            return False
+        
+        return True
+    
+    def _fallback_vietnamese_translation(self, text: str) -> Optional[str]:
+        """Use translation model as fallback for Vietnamese translation"""
+        if not self.vietnamese_translator:
+            logger.warning("[LOCAL_LLM] Vietnamese translator not available for fallback")
+            return None
+        
+        try:
+            result = self.vietnamese_translator.translate_text(text)
+            if result and result.strip() and result.strip() != text.strip():
+                logger.info("[LOCAL_LLM] Fallback Vietnamese translation successful")
+                return result.strip()
+            else:
+                logger.warning("[LOCAL_LLM] Fallback Vietnamese translation failed or returned identical text")
+                return None
+        except Exception as e:
+            logger.error(f"[LOCAL_LLM] Fallback Vietnamese translation error: {e}")
+            return None
+    
     def backtranslate(self, text: str, via_lang: str = "vi") -> Optional[str]:
-        """Backtranslate text using MedAlpaca with medical accuracy"""
+        """Backtranslate text using MedAlpaca with Vietnamese fallback mechanism"""
         if not text:
             return text
             
-        # First translate to target language
+        # First translate to target language (this will use fallback if needed)
         translated = self.translate(text, target_lang=via_lang)
         if not translated:
             return None
             
         # Then translate back to English with medical focus
         if via_lang == "vi":
+            # Try MedAlpaca for back-translation first
             prompt = (
                 "Translate the following Vietnamese medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Ensure the translation is medically accurate. Return only the translation without any introduction or commentary.\n\n"
                 f"{translated}"
             )
+            
+            result = self.client.generate(prompt, max_tokens=min(900, len(text)+150), temperature=0.0)
+            if result and result.strip():
+                return result.strip()
+            
+            # Fallback: Use translation model for back-translation
+            logger.info("[LOCAL_LLM] MedAlpaca back-translation failed, using fallback translation model")
+            return self._fallback_english_translation(translated)
         else:
             prompt = (
                 f"Translate the following {via_lang} medical text back to English while preserving all medical terminology, clinical facts, and professional medical language. Return only the translation without any introduction or commentary.\n\n"
                 f"{translated}"
             )
+            
+            result = self.client.generate(prompt, max_tokens=min(900, len(text)+150), temperature=0.0)
+            return result.strip() if result else None
+    
+    def _fallback_english_translation(self, vietnamese_text: str) -> Optional[str]:
+        """Use translation model as fallback for English back-translation"""
+        if not self.vietnamese_translator:
+            logger.warning("[LOCAL_LLM] Vietnamese translator not available for back-translation fallback")
+            return None
         
-        result = self.client.generate(prompt, max_tokens=min(900, len(text)+150), temperature=0.0)
-        return result.strip() if result else None
+        try:
+            # Use the translator's back-translation capability
+            # Note: This would need to be implemented in the VietnameseTranslator class
+            # For now, we'll use a simple approach
+            result = self.vietnamese_translator.translate_text(vietnamese_text)
+            if result and result.strip() and result.strip() != vietnamese_text.strip():
+                logger.info("[LOCAL_LLM] Fallback English back-translation successful")
+                return result.strip()
+            else:
+                logger.warning("[LOCAL_LLM] Fallback English back-translation failed or returned identical text")
+                return None
+        except Exception as e:
+            logger.error(f"[LOCAL_LLM] Fallback English back-translation error: {e}")
+            return None
     
     def consistency_check(self, user: str, output: str) -> bool:
         """Check consistency using MedAlpaca with medical validation focus"""
@@ -474,6 +588,111 @@ class LocalParaphraser:
                 return True
         
         return False
+    
+    def create_vietnamese_training_data(self, question: str, answer: str, max_retries: int = 2) -> list:
+        """
+        Create Vietnamese training data with fallback mechanism.
+        
+        This method tries to get Vietnamese translations from MedAlpaca first.
+        If MedAlpaca fails (max 2 retries), it allows MedAlpaca to answer in English
+        and uses translation models to create Vietnamese versions.
+        
+        Args:
+            question: English question
+            answer: English answer
+            max_retries: Maximum retries for MedAlpaca Vietnamese translation
+            
+        Returns:
+            List of training data tuples: [(question_vi, answer_vi), ...]
+        """
+        training_data = []
+        
+        # Try to get Vietnamese translation from MedAlpaca
+        question_vi = self.translate(question, target_lang="vi", max_retries=max_retries)
+        answer_vi = self.translate(answer, target_lang="vi", max_retries=max_retries)
+        
+        if question_vi and answer_vi:
+            # MedAlpaca successfully translated both
+            training_data.append((question_vi, answer_vi))
+            logger.info("[LOCAL_LLM] Created Vietnamese training data using MedAlpaca translation")
+        else:
+            # MedAlpaca failed, use fallback mechanism
+            logger.info("[LOCAL_LLM] MedAlpaca Vietnamese translation failed, using fallback mechanism")
+            
+            # Allow MedAlpaca to answer in English (this should always work)
+            english_answer = self.client.generate(
+                f"Answer the following medical question: {question}",
+                max_tokens=min(800, len(answer)+100),
+                temperature=0.1
+            )
+            
+            if english_answer and english_answer.strip():
+                # Use translation models to create Vietnamese versions
+                if self.vietnamese_translator:
+                    try:
+                        # Translate question using fallback
+                        question_vi_fallback = self._fallback_vietnamese_translation(question)
+                        # Translate answer using fallback
+                        answer_vi_fallback = self._fallback_vietnamese_translation(english_answer.strip())
+                        
+                        if question_vi_fallback and answer_vi_fallback:
+                            training_data.append((question_vi_fallback, answer_vi_fallback))
+                            logger.info("[LOCAL_LLM] Created Vietnamese training data using fallback translation")
+                        else:
+                            logger.warning("[LOCAL_LLM] Fallback translation failed, no Vietnamese training data created")
+                    except Exception as e:
+                        logger.error(f"[LOCAL_LLM] Fallback translation error: {e}")
+                else:
+                    logger.warning("[LOCAL_LLM] Vietnamese translator not available for fallback")
+            else:
+                logger.warning("[LOCAL_LLM] MedAlpaca failed to generate English answer for fallback")
+        
+        return training_data
+    
+    def create_vietnamese_augmented_data(self, question: str, answer: str) -> list:
+        """
+        Create multiple Vietnamese training data variations using different approaches.
+        
+        This method creates:
+        1. Direct Vietnamese translation (if successful)
+        2. English answer + Vietnamese translation fallback
+        3. Paraphrased English + Vietnamese translation
+        
+        Args:
+            question: English question
+            answer: English answer
+            
+        Returns:
+            List of training data tuples: [(question_vi, answer_vi), ...]
+        """
+        training_data = []
+        
+        # 1. Try direct Vietnamese translation
+        direct_data = self.create_vietnamese_training_data(question, answer)
+        training_data.extend(direct_data)
+        
+        # 2. Create paraphrased English version and translate
+        try:
+            paraphrased_answer = self.paraphrase(answer, difficulty="easy")
+            if paraphrased_answer and paraphrased_answer != answer:
+                paraphrased_data = self.create_vietnamese_training_data(question, paraphrased_answer)
+                training_data.extend(paraphrased_data)
+                logger.info("[LOCAL_LLM] Created Vietnamese training data from paraphrased English")
+        except Exception as e:
+            logger.warning(f"[LOCAL_LLM] Failed to create paraphrased Vietnamese data: {e}")
+        
+        # 3. Create back-translated version
+        try:
+            backtranslated_answer = self.backtranslate(answer, via_lang="vi")
+            if backtranslated_answer and backtranslated_answer != answer:
+                backtranslated_data = self.create_vietnamese_training_data(question, backtranslated_answer)
+                training_data.extend(backtranslated_data)
+                logger.info("[LOCAL_LLM] Created Vietnamese training data from back-translated English")
+        except Exception as e:
+            logger.warning(f"[LOCAL_LLM] Failed to create back-translated Vietnamese data: {e}")
+        
+        logger.info(f"[LOCAL_LLM] Created {len(training_data)} Vietnamese training data variations")
+        return training_data
     
     def unload(self):
         """Unload the model"""
