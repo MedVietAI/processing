@@ -21,5 +21,6 @@ transformers
 torch
 sentencepiece
 sacremoses
+protobuf
 
 # Note: Heavy local LLM dependencies (accelerate, bitsandbytes, etc.) are excluded for cloud mode
